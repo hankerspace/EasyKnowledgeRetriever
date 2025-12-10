@@ -567,11 +567,12 @@ class EasyKnowledgeRetriever:
         self.embedding_token_limit = embedding_max_token_size
 
         # Step 2: Apply priority wrapper decorator
-        self.embedding_func = priority_limit_async_func_call(
-            self.embedding_func_max_async,
-            llm_timeout=self.default_embedding_timeout,
-            queue_name="Embedding func",
-        )(self.embedding_func)
+        if self.embedding_func:
+            self.embedding_func = priority_limit_async_func_call(
+                self.embedding_func_max_async,
+                llm_timeout=self.default_embedding_timeout,
+                queue_name="Embedding func",
+            )(self.embedding_func)
 
 
         # Initialize all storages using Factory
@@ -685,17 +686,18 @@ class EasyKnowledgeRetriever:
         hashing_kv = self.llm_response_cache
 
         # Get timeout from LLM model kwargs for dynamic timeout calculation
-        self.llm_model_func = priority_limit_async_func_call(
-            self.llm_model_max_async,
-            llm_timeout=self.default_llm_timeout,
-            queue_name="LLM func",
-        )(
-            partial(
-                self.llm_model_func,  # type: ignore
-                hashing_kv=hashing_kv,
-                **self.llm_model_kwargs,
+        if self.llm_model_func:
+            self.llm_model_func = priority_limit_async_func_call(
+                self.llm_model_max_async,
+                llm_timeout=self.default_llm_timeout,
+                queue_name="LLM func",
+            )(
+                partial(
+                    self.llm_model_func,  # type: ignore
+                    hashing_kv=hashing_kv,
+                    **self.llm_model_kwargs,
+                )
             )
-        )
 
         self._storages_status = StoragesStatus.CREATED
 
@@ -1182,6 +1184,40 @@ class EasyKnowledgeRetriever:
                 track_id,
             )
         )
+    async def ingest(self, file_path: str, **kwargs) -> Dict[str, Any]:
+        """
+        Ingest a document using Mineru parser.
+
+        Args:
+            file_path: Path to the document file (PDF).
+            **kwargs: Additional arguments passed to the parser (e.g. start_page, end_page).
+            
+        Returns:
+            The parsed data structure.
+        """
+        import os
+        from easy_knowledge_retriever.operations.mineru_parser import MineruParser
+
+        # Use a subdirectory in working_dir for parsed docs
+        parsed_docs_dir = os.path.join(self.working_dir, "parsed_docs")
+        if not os.path.exists(parsed_docs_dir):
+            os.makedirs(parsed_docs_dir)
+
+        parser = MineruParser(output_dir=parsed_docs_dir)
+        try:
+            print(f"Parsing document: {file_path}...")
+            parsed_data = parser.parse(file_path, **kwargs)
+            
+            print(f"Indexing document content...")
+            # ingest into RAG
+            # We wrap input in list as ainsert expects a list of documents
+            await self.ainsert(input=[parsed_data], file_paths=[file_path])
+            
+            return parsed_data
+        except Exception as e:
+            print(f"Error ingesting {file_path}: {e}")
+            raise
+
 
     async def ainsert(
         self,
