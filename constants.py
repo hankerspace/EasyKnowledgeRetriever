@@ -74,21 +74,10 @@ DEFAULT_MAX_FILE_PATH_LENGTH = 32768
 # Placeholder for more file paths in meta data for entity and relation (Should not be changed)
 DEFAULT_FILE_PATH_MORE_PLACEHOLDER = "truncated"
 
-# Default temperature for LLM
-DEFAULT_TEMPERATURE = 1.0
 
-# Async configuration defaults
-DEFAULT_MAX_ASYNC = 1  # Default maximum async operations
-DEFAULT_MAX_PARALLEL_INSERT = 1  # Default maximum parallel insert operations
+# Default maximum parallel insert operations
+DEFAULT_MAX_PARALLEL_INSERT = 1
 
-# Embedding configuration defaults
-DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 1  # Default max async for embedding functions
-DEFAULT_EMBEDDING_BATCH_NUM = 1  # Default batch size for embedding computations
-
-
-# Default llm and embedding timeout
-DEFAULT_LLM_TIMEOUT = 1000000
-DEFAULT_EMBEDDING_TIMEOUT = 1000000
 
 # Logging configuration defaults
 DEFAULT_LOG_MAX_BYTES = 10485760  # Default 10MB

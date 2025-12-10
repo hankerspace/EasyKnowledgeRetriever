@@ -12,7 +12,14 @@ from constants import (
 )
 
 async def safe_vdb_operation_with_exception(
-    func: Callable, *args, **kwargs
+    func: Callable | None = None,
+    *args,
+    operation: Callable | None = None,
+    operation_name: str = "unknown_operation",
+    entity_name: str | None = None,
+    max_retries: int = 3,
+    retry_delay: float = 1.0,
+    **kwargs,
 ) -> Optional[Any]:
     """Execute a VectorDB operation safely, logging errors and returning None on failure.
 
@@ -21,19 +28,42 @@ async def safe_vdb_operation_with_exception(
     logs the error with context, and returns None.
 
     Args:
-        func: The async function to execute
+        func: The async function to execute (positional or keyword)
+        operation: Alternative keyword for func
+        operation_name: Name of operation for logging
+        entity_name: Related entity name for logging
+        max_retries: Number of retries
+        retry_delay: Delay between retries in seconds
         *args: Positional arguments for the function
         **kwargs: Keyword arguments for the function
 
     Returns:
         The result of the function call, or None if an exception occurred.
     """
-    try:
-        return await func(*args, **kwargs)
-    except Exception as e:
-        func_name = getattr(func, "__name__", str(func))
-        logger.error(f"Error in VectorDB operation '{func_name}': {e}")
+    target_func = operation if operation is not None else func
+    if target_func is None:
+        logger.error("safe_vdb_operation_with_exception called without a function/operation.")
         return None
+
+    op_name = operation_name or getattr(target_func, "__name__", str(target_func))
+
+    for attempt in range(max_retries):
+        try:
+            return await target_func(*args, **kwargs)
+        except Exception as e:
+            is_last_attempt = attempt == max_retries - 1
+            error_prefix = "Failed" if is_last_attempt else f"Error (attempt {attempt + 1}/{max_retries})"
+
+            msg = f"{error_prefix} in VectorDB operation '{op_name}': {e}"
+            if entity_name:
+                msg += f" for entity '{entity_name}'"
+
+            logger.error(msg)
+
+            if not is_last_attempt:
+                await asyncio.sleep(retry_delay)
+
+    return None
 
 
 def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:

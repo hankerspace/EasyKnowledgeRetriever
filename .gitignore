@@ -1,3 +1,5 @@
-example/data/
-example/pdf/
+example/data/**
+example/pdf/**
 .idea
+.junie
+

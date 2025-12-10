@@ -29,9 +29,6 @@ from neo4j import (  # type: ignore
     AsyncManagedTransaction,
 )
 
-# from dotenv import load_dotenv
-
-# load_dotenv(dotenv_path=".env", override=False)
 
 # config = configparser.ConfigParser()
 # config.read("config.ini", "utf-8")

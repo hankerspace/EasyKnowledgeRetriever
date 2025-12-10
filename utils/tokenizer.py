@@ -10,31 +10,20 @@ class TokenizerInterface(abc.ABC):
     def encode(self, text: str) -> list[int]:
         pass
 
+    @abc.abstractmethod
+    def decode(self, tokens: list[int]) -> str:
+        pass
+
 
 class Tokenizer(TokenizerInterface):
     def __init__(self, tokenizer_model: str):
         self.tokenizer_model = tokenizer_model
-        # Special setup for google_genai. Because in the google provider, the tokenizer is not exposed through the binding.
-        # But for other providers, such as openai, azure_openai (which uses openai binding), deepseek (which uses openai binding)
-        # the tokenizer is exposed through the binding, so we don't need to specify the model name just for tokenization separately.
-        if (
-            tokenizer_model == "google_genai"
-        ):  # TODO: this needs to be moved to the google_genai binding
-            try:
-                import google.generativeai as genai
-
-                self.genai = genai
-            except ImportError:
-                raise ImportError(
-                    "The 'google-generativeai' library is required to use the 'google_genai' tokenizer."
-                )
 
     def encode(self, text: str) -> list[int]:
-        if self.tokenizer_model == "google_genai":
-            # Just do a rough count for now
-            return [0] * int(len(text) / 2)
-        else:
-            return list(text.encode("utf-8"))
+        return list(text.encode("utf-8"))
+
+    def decode(self, tokens: list[int]) -> str:
+        return bytes(tokens).decode("utf-8")
 
 
 class TiktokenTokenizer(TokenizerInterface):
@@ -50,6 +39,9 @@ class TiktokenTokenizer(TokenizerInterface):
 
     def encode(self, text: str) -> list[int]:
         return self.encoding.encode(text)
+
+    def decode(self, tokens: list[int]) -> str:
+        return self.encoding.decode(tokens)
 
 
 def truncate_list_by_token_size(

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-__version__ = "1.4.9.9"
-
 import traceback
 import asyncio
 import configparser
@@ -44,30 +42,41 @@ from constants import (
     DEFAULT_RELATED_CHUNK_NUMBER,
     DEFAULT_KG_CHUNK_PICK_METHOD,
 
-    DEFAULT_SUMMARY_MAX_TOKENS,
-    DEFAULT_SUMMARY_CONTEXT_SIZE,
-    DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
-    DEFAULT_MAX_ASYNC,
-    DEFAULT_MAX_PARALLEL_INSERT,
     DEFAULT_MAX_GRAPH_NODES,
     DEFAULT_MAX_SOURCE_IDS_PER_ENTITY,
     DEFAULT_MAX_SOURCE_IDS_PER_RELATION,
     DEFAULT_ENTITY_TYPES,
     DEFAULT_SUMMARY_LANGUAGE,
-    DEFAULT_LLM_TIMEOUT,
-    DEFAULT_EMBEDDING_TIMEOUT,
     DEFAULT_SOURCE_IDS_LIMIT_METHOD,
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_FILE_PATH_MORE_PLACEHOLDER,
-    DEFAULT_EMBEDDING_FUNC_MAX_ASYNC,
-    DEFAULT_EMBEDDING_BATCH_NUM,
+    DEFAULT_MAX_PARALLEL_INSERT,
 )
+
 
 
 from kg.registry import (
     STORAGES,
     verify_storage_implementation,
 )
+from config.global_config import GlobalConfig
+from factories.storage_factory import StorageFactory
+from config.llm_config import (
+    LLMConfig,
+    DEFAULT_SUMMARY_MAX_TOKENS,
+    DEFAULT_SUMMARY_CONTEXT_SIZE,
+    DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
+    DEFAULT_MAX_ASYNC,
+    DEFAULT_LLM_TIMEOUT,
+)
+from config.embedding_config import (
+    EmbeddingConfig,
+    DEFAULT_EMBEDDING_BATCH_NUM,
+    DEFAULT_EMBEDDING_FUNC_MAX_ASYNC,
+    DEFAULT_EMBEDDING_TIMEOUT,
+)
+from config.rerank_config import RerankConfig
+
 
 
 from kg.shared_memory import (
@@ -95,13 +104,15 @@ from kg.base import (
     QueryResult,
 )
 from kg.namespace import NameSpace
-from operate import (
-    chunking_by_token_size,
-    extract_entities,
+from easy_knowledge_retriever.operations.chunking import chunking_by_token_size
+from easy_knowledge_retriever.operations.extraction import extract_entities
+from easy_knowledge_retriever.operations.graph_ops import (
     merge_nodes_and_edges,
+    rebuild_knowledge_from_chunks,
+)
+from easy_knowledge_retriever.operations.query import (
     kg_query,
     naive_query,
-    rebuild_knowledge_from_chunks,
 )
 from constants import GRAPH_FIELD_SEP
 from utils.tokenizer import Tokenizer, TiktokenTokenizer
@@ -273,7 +284,7 @@ class EasyKnowledgeRetriever:
     # Embedding
     # ---
 
-    embedding_func: EmbeddingFunc | None = field(default=None)
+    embedding_func: BaseEmbeddingService | None = field(default=None)
     """Function for computing text embeddings. Must be set before use."""
 
     embedding_token_limit: int | None = field(default=None, init=False)
@@ -307,7 +318,7 @@ class EasyKnowledgeRetriever:
     # LLM Configuration
     # ---
 
-    llm_model_func: Callable[..., object] | None = field(default=None)
+    llm_model_func: BaseLLMService | None = field(default=None)
     """Function for interacting with the large language model (LLM). Must be set before use."""
 
     llm_model_name: str = field(default="gpt-4o-mini")
@@ -427,7 +438,44 @@ class EasyKnowledgeRetriever:
 
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
+
+
     def __post_init__(self):
+        # -- New Config Pattern Logic --
+        # We try to initialize configs from kwargs if not explicit passed (backward compatibility)
+        # For this refactor, we will rely on values being present in the dataclass fields either from defaults or init.
+        
+        # Initialize storage factory
+        # We need a way to pass this in or create it. 
+        # Since we are keeping this class as a dataclass for now (hard to change completely without breaking everything)
+        # We will create internal config objects based on self's fields if they weren't injected.
+        
+        # Sync Global Config from self
+        # self is effectively a superset of GlobalConfig + other things
+        # We create a dictionary of current values to use for factory
+        
+        # Ensure working directory exists (Moved from below)
+        if not os.path.exists(self.working_dir):
+            logger.info(f"Creating working directory {self.working_dir}")
+            os.makedirs(self.working_dir)
+
+        current_config_dict = asdict(self)
+        
+        # Create a temporary global config to pass to factory
+        # Note: self has fields that match GlobalConfig. 
+        # We filter keys that exist in GlobalConfig
+        global_config_keys = GlobalConfig.__dataclass_fields__.keys()
+        global_config_data = {k: v for k, v in current_config_dict.items() if k in global_config_keys}
+        
+        # Fix for embedding token limit which is init=False
+        if "embedding_token_limit" in global_config_data:
+             del global_config_data["embedding_token_limit"]
+             
+        self._global_config_obj = GlobalConfig(**global_config_data)
+
+        # Initialize Storage Factory
+        self._storage_factory = StorageFactory(self._global_config_obj)
+
         from kg.shared_memory import (
             initialize_share_data,
         )
@@ -458,11 +506,9 @@ class EasyKnowledgeRetriever:
 
         initialize_share_data()
 
-        if not os.path.exists(self.working_dir):
-            logger.info(f"Creating working directory {self.working_dir}")
-            os.makedirs(self.working_dir)
-
         # Verify storage implementation compatibility and environment variables
+        # Using factory verification implicitly or explicitly
+        # We keep this check for now as it provides fast feedback
         storage_configs = [
             ("KV_STORAGE", self.kv_storage),
             ("VECTOR_STORAGE", self.vector_storage),
@@ -473,8 +519,6 @@ class EasyKnowledgeRetriever:
         for storage_type, storage_name in storage_configs:
             # Verify storage implementation compatibility
             verify_storage_implementation(storage_type, storage_name)
-            # Check environment variables - Deprecated/Removed to support programmatic config
-            # check_storage_env_vars(storage_name)
 
         # Ensure vector_db_storage_cls_kwargs has required fields
         self.vector_db_storage_cls_kwargs = {
@@ -529,28 +573,28 @@ class EasyKnowledgeRetriever:
             queue_name="Embedding func",
         )(self.embedding_func)
 
-        # Initialize all storages
-        self.key_string_value_json_storage_cls: type[BaseKVStorage] = (
-            self._get_storage_class(self.kv_storage)
-        )  # type: ignore
-        self.vector_db_storage_cls: type[BaseVectorStorage] = self._get_storage_class(
-            self.vector_storage
-        )  # type: ignore
-        self.graph_storage_cls: type[BaseGraphStorage] = self._get_storage_class(
-            self.graph_storage
-        )  # type: ignore
-        self.key_string_value_json_storage_cls = partial(  # type: ignore
-            self.key_string_value_json_storage_cls, global_config=global_config
-        )
-        self.vector_db_storage_cls = partial(  # type: ignore
-            self.vector_db_storage_cls, global_config=global_config
-        )
-        self.graph_storage_cls = partial(  # type: ignore
-            self.graph_storage_cls, global_config=global_config
-        )
+
+        # Initialize all storages using Factory
+        # Initialize all storages using Factory
+        
+        # 1. Assign classes (for introspection/compatibility)
+        self.key_string_value_json_storage_cls = self._storage_factory._get_storage_class(self.kv_storage)
+        self.vector_db_storage_cls = self._storage_factory._get_storage_class(self.vector_storage)
+        self.graph_storage_cls = self._storage_factory._get_storage_class(self.graph_storage)
+        self.doc_status_storage_cls = self._storage_factory._get_storage_class(self.doc_status_storage)
+        
+        
+        # Usage later: self.key_string_value_json_storage_cls(namespace=...) -> returns instance
+        
+        # So yes, partial(factory_method, storage_name=self.kv_storage) returns a callable that accepts other kwargs and returns instance. 
+        # This matches the signature expected by usage later.
+
 
         # Initialize document status storage
-        self.doc_status_storage_cls = self._get_storage_class(self.doc_status_storage)
+        self.doc_status_storage_cls = partial(
+            self._storage_factory.create_doc_status_storage,
+            storage_name=self.doc_status_storage
+        )
 
         self.llm_response_cache: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_LLM_RESPONSE_CACHE,
@@ -562,60 +606,70 @@ class EasyKnowledgeRetriever:
         self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_TEXT_CHUNKS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.full_docs: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_FULL_DOCS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.full_entities: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_FULL_ENTITIES,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.full_relations: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_FULL_RELATIONS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.entity_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_ENTITY_CHUNKS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.relation_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=NameSpace.KV_STORE_RELATION_CHUNKS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.chunk_entity_relation_graph: BaseGraphStorage = self.graph_storage_cls(  # type: ignore
             namespace=NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
         )
 
         self.entities_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
             namespace=NameSpace.VECTOR_STORE_ENTITIES,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
             meta_fields={"entity_name", "source_id", "content", "file_path"},
         )
         self.relationships_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
             namespace=NameSpace.VECTOR_STORE_RELATIONSHIPS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
             meta_fields={"src_id", "tgt_id", "source_id", "content", "file_path"},
         )
         self.chunks_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
             workspace=self.workspace,
+            global_config=global_config,
             embedding_func=self.embedding_func,
             meta_fields={"full_doc_id", "content", "file_path"},
         )
@@ -624,7 +678,6 @@ class EasyKnowledgeRetriever:
         self.doc_status: DocStatusStorage = self.doc_status_storage_cls(
             namespace=NameSpace.DOC_STATUS,
             workspace=self.workspace,
-            global_config=global_config,
             embedding_func=None,
         )
 
@@ -1096,7 +1149,7 @@ class EasyKnowledgeRetriever:
 
     def insert(
         self,
-        input: str | list[str],
+        input: str | list[str] | list[dict[str, Any]],
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
         ids: str | list[str] | None = None,
@@ -1106,7 +1159,7 @@ class EasyKnowledgeRetriever:
         """Sync Insert documents with checkpoint support
 
         Args:
-            input: Single document string or list of document strings
+            input: Single document string, list of document strings, or list of dicts ({"content": "...", "pages": [...]})
             split_by_character: if split_by_character is not None, split the string by character, if chunk longer than
             chunk_token_size, it will be split again by token size.
             split_by_character_only: if split_by_character_only is True, split the string by character only, when
@@ -1132,7 +1185,7 @@ class EasyKnowledgeRetriever:
 
     async def ainsert(
         self,
-        input: str | list[str],
+        input: str | list[str] | list[dict[str, Any]],
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
         ids: str | list[str] | None = None,
@@ -1142,7 +1195,7 @@ class EasyKnowledgeRetriever:
         """Async Insert documents with checkpoint support
 
         Args:
-            input: Single document string or list of document strings
+            input: Single document string, list of document strings, or list of dicts ({"content": "...", "pages": [...]})
             split_by_character: if split_by_character is not None, split the string by character, if chunk longer than
             chunk_token_size, it will be split again by token size.
             split_by_character_only: if split_by_character_only is True, split the string by character only, when
@@ -1239,7 +1292,7 @@ class EasyKnowledgeRetriever:
 
     async def apipeline_enqueue_documents(
         self,
-        input: str | list[str],
+        input: str | list[str] | list[dict[str, Any]],
         ids: list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
@@ -1253,7 +1306,7 @@ class EasyKnowledgeRetriever:
         4. Enqueue document in status
 
         Args:
-            input: Single document string or list of document strings
+            input: Single document string, list of document strings, or list of dicts ({"content": "...", "pages": [...]})
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated with "enqueue" prefix
@@ -1270,6 +1323,16 @@ class EasyKnowledgeRetriever:
             ids = [ids]
         if isinstance(file_paths, str):
             file_paths = [file_paths]
+            
+        # Normalize input to list of dicts/strings
+        normalized_input = []
+        for item in input:
+            if isinstance(item, str):
+                normalized_input.append({"content": item})
+            elif isinstance(item, dict):
+                 normalized_input.append(item)
+            else:
+                 raise ValueError("Input must be string or dict")
 
         # If file_paths is provided, ensure it matches the number of documents
         if file_paths is not None:
@@ -1295,31 +1358,39 @@ class EasyKnowledgeRetriever:
 
             # Generate contents dict and remove duplicates in one pass
             unique_contents = {}
-            for id_, doc, path in zip(ids, input, file_paths):
-                cleaned_content = sanitize_text_for_encoding(doc)
+            for id_, doc_data, path in zip(ids, normalized_input, file_paths):
+                # doc_data is now a dict
+                doc_content = doc_data.get("content", "")
+                doc_pages = doc_data.get("pages", None)
+                cleaned_content = sanitize_text_for_encoding(doc_content)
+                
                 if cleaned_content not in unique_contents:
-                    unique_contents[cleaned_content] = (id_, path)
+                    unique_contents[cleaned_content] = (id_, path, doc_pages)
 
             # Reconstruct contents with unique content
             contents = {
-                id_: {"content": content, "file_path": file_path}
-                for content, (id_, file_path) in unique_contents.items()
+                id_: {"content": content, "file_path": file_path, "pages": pages}
+                for content, (id_, file_path, pages) in unique_contents.items()
             }
         else:
             # Clean input text and remove duplicates in one pass
             unique_content_with_paths = {}
-            for doc, path in zip(input, file_paths):
-                cleaned_content = sanitize_text_for_encoding(doc)
+            for doc_data, path in zip(normalized_input, file_paths):
+                doc_content = doc_data.get("content", "")
+                doc_pages = doc_data.get("pages", None)
+                cleaned_content = sanitize_text_for_encoding(doc_content)
+                
                 if cleaned_content not in unique_content_with_paths:
-                    unique_content_with_paths[cleaned_content] = path
+                    unique_content_with_paths[cleaned_content] = (path, doc_pages)
 
             # Generate contents dict of MD5 hash IDs and documents with paths
             contents = {
                 compute_mdhash_id(content, prefix="doc-"): {
                     "content": content,
                     "file_path": path,
+                    "pages": pages,
                 }
-                for content, path in unique_content_with_paths.items()
+                for content, (path, pages) in unique_content_with_paths.items()
             }
 
         # 2. Generate document initial status (without content)
@@ -1374,6 +1445,7 @@ class EasyKnowledgeRetriever:
             doc_id: {
                 "content": contents[doc_id]["content"],
                 "file_path": contents[doc_id]["file_path"],
+                "pages": contents[doc_id].get("pages"),
             }
             for doc_id in new_docs.keys()
         }
@@ -1791,6 +1863,7 @@ class EasyKnowledgeRetriever:
                             content = content_data["content"]
 
                             # Call chunking function, supporting both sync and async implementations
+                            pages = content_data.get("pages")
                             chunking_result = self.chunking_func(
                                 self.tokenizer,
                                 content,
@@ -1798,6 +1871,7 @@ class EasyKnowledgeRetriever:
                                 split_by_character_only,
                                 self.chunk_overlap_token_size,
                                 self.chunk_token_size,
+                                pages=pages,
                             )
 
                             # If result is awaitable, await to get actual result

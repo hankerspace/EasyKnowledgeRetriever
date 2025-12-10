@@ -8,10 +8,6 @@ from utils.hashing import compute_mdhash_id
 from .base import BaseVectorStorage
 from constants import DEFAULT_MAX_FILE_PATH_LENGTH
 from kg.concurrency import get_data_init_lock
-import pipmaster as pm
-
-if not pm.is_installed("pymilvus"):
-    pm.install("pymilvus>=2.6.2")
 
 # import configparser
 from pymilvus import MilvusClient, DataType, CollectionSchema, FieldSchema  # type: ignore

@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
 import os
-# from dotenv import load_dotenv
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -26,13 +25,6 @@ from constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
 
 )
-
-# use the .env that is inside the current folder
-# allows to use different .env file for each easy_knowledge_retriever instance
-# the OS environment variables take precedence over the .env file
-# load_dotenv(dotenv_path=".env", override=False)
-
-
 
 
 

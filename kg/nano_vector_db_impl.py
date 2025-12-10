@@ -19,10 +19,6 @@ from .concurrency import (
     get_namespace_lock,
     get_data_init_lock,
 )
-import pipmaster as pm
-
-if not pm.is_installed("nano-vectordb"):
-    pm.install("nano-vectordb")
 
 from nano_vectordb import NanoVectorDB
 

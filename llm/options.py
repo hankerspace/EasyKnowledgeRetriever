@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, ClassVar, List, get_args, get_origin
 
 
-from constants import DEFAULT_TEMPERATURE
+from config.llm_config import DEFAULT_TEMPERATURE
 
 
 def _resolve_optional_type(field_type: Any) -> Any:
@@ -360,8 +360,7 @@ class OpenAILLMOptions(BindingOptions):
 
 if __name__ == "__main__":
     import sys
-    # import dotenv
-    # dotenv.load_dotenv(dotenv_path=".env", override=False)
+
 
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         parser = ArgumentParser(description="Test binding options")

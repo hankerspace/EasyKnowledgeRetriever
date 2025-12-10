@@ -35,20 +35,9 @@ from ..namespace import NameSpace, is_namespace
 from ..utils import logger
 from kg.concurrency import get_data_init_lock
 
-import pipmaster as pm
-
-if not pm.is_installed("asyncpg"):
-    pm.install("asyncpg")
 
 import asyncpg  # type: ignore
 from asyncpg import Pool  # type: ignore
-
-from dotenv import load_dotenv
-
-# use the .env that is inside the current folder
-# allows to use different .env file for each easy_knowledge_retriever instance
-# the OS environment variables take precedence over the .env file
-load_dotenv(dotenv_path=".env", override=False)
 
 T = TypeVar("T")
 
