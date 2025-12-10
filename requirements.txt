@@ -1,0 +1,42 @@
+# Core & Utilities
+
+asyncpg>=0.29.0,<1.0.0
+fastapi
+gunicorn
+httpx
+aiofiles
+python-multipart
+pyjwt
+
+networkx
+numpy
+
+pipmaster
+
+python-dotenv
+
+starlette
+tenacity
+tiktoken
+uvicorn
+
+# LLM Providers
+
+
+openai>=2.0.0,<3.0.0
+
+# Vector DB & Search
+
+# Vector DB & Search
+
+
+# Graph DB
+neo4j>=5.0.0,<7.0.0
+
+# Document Processing
+
+
+# Other
+pypinyin
+nano-vectordb
+pypdf
