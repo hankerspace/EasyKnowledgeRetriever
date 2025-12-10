@@ -17,9 +17,17 @@ nano-vectordb
 # Document Processing
 pypdf
 
+mineru
+doclayout_yolo
+
+
+# Mineru & DocLayout-YOLO Dependencies
+ultralytics
+ftfy
+shapely
+pyclipper
+omegaconf
+
 # Other
 pypinyin
-
-sys
-    #     # import dotenv
-    #     # dotenv.load_dotenv(dotenv_path=".env", override=False)
+dill

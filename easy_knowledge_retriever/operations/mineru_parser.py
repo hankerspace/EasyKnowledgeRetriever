@@ -47,12 +47,22 @@ class MineruParser:
             current_dir = Path(__file__).parent
             mineru_tool = current_dir / "mineru_tool.py"
             
+            # Detect device
+            import torch
+            device = "cpu"
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = "mps"
+            
+            print(f"Using device: {device}")
+
             cmd = [
                 sys.executable,
                 str(mineru_tool),
                 "-p", str(file_path_obj),
                 "-o", str(working_dir),
-                "--device", "cpu"
+                "--device", device
             ]
             
             if start_page is not None:
@@ -65,7 +75,7 @@ class MineruParser:
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
-                raise RuntimeError(f"Mineru failed: {result.stderr}")
+                raise RuntimeError(f"Mineru failed: {result.stderr}\nStdout: {result.stdout}")
                 
             # Parse output
             # Output structure: working_dir / file_stem / 'auto' / file_stem_content_list.json
@@ -80,7 +90,8 @@ class MineruParser:
                 # Let's try to find the json file if exact match fails
                 json_files = list(working_dir.glob(f"**/*_content_list.json"))
                 if not json_files:
-                    raise FileNotFoundError(f"Output JSON not found in {working_dir}")
+                    # Include stdout/stderr in error message for debugging
+                    raise FileNotFoundError(f"Output JSON not found in {working_dir}.\nMineru Stdout: {result.stdout}\nMineru Stderr: {result.stderr}")
                 content_list_path = json_files[0]
                 output_subdir = content_list_path.parent
 
