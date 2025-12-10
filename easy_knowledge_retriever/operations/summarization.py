@@ -1,12 +1,17 @@
 from __future__ import annotations
 import json
 from functools import partial
-from utils.logger import logger
-from utils.tokenizer import Tokenizer, truncate_list_by_token_size
-from llm.utils import use_llm_func_with_cache
-from llm.prompts import PROMPTS
-from kg.base import BaseKVStorage
-from constants import DEFAULT_SUMMARY_LANGUAGE
+from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer, truncate_list_by_token_size
+from easy_knowledge_retriever.llm.utils import use_llm_func_with_cache
+from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.kg.base import BaseKVStorage
+from easy_knowledge_retriever.constants import (
+    DEFAULT_SUMMARY_LANGUAGE,
+    DEFAULT_SUMMARY_MAX_TOKENS,
+    DEFAULT_SUMMARY_CONTEXT_SIZE,
+    DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
+)
 
 async def _handle_entity_relation_summary(
     description_type: str,
@@ -27,8 +32,9 @@ async def _handle_entity_relation_summary(
 
     # Get configuration
     tokenizer: Tokenizer = global_config["tokenizer"]
-    summary_context_size = global_config["summary_context_size"]
-    summary_max_tokens = global_config["summary_max_tokens"]
+    llm_service = global_config.get("llm_service")
+    summary_context_size = getattr(llm_service, "summary_context_size", DEFAULT_SUMMARY_CONTEXT_SIZE)
+    summary_max_tokens = getattr(llm_service, "summary_max_tokens", DEFAULT_SUMMARY_MAX_TOKENS)
     force_llm_summary_on_merge = global_config["force_llm_summary_on_merge"]
 
     current_list = description_list[:]  # Copy the list to avoid modifying original
@@ -135,15 +141,16 @@ async def _summarize_descriptions(
     # Apply higher priority (8) to entity/relation summary tasks
     use_llm_func = partial(use_llm_func, _priority=8)
 
-    language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
+    language = global_config.get("language", DEFAULT_SUMMARY_LANGUAGE)
 
-    summary_length_recommended = global_config["summary_length_recommended"]
+    llm_service = global_config.get("llm_service")
+    summary_length_recommended = getattr(llm_service, "summary_length_recommended", DEFAULT_SUMMARY_LENGTH_RECOMMENDED)
 
     prompt_template = PROMPTS["summarize_entity_descriptions"]
 
     # Convert descriptions to JSONL format and apply token-based truncation
     tokenizer = global_config["tokenizer"]
-    summary_context_size = global_config["summary_context_size"]
+    summary_context_size = getattr(llm_service, "summary_context_size", DEFAULT_SUMMARY_CONTEXT_SIZE)
 
     # Create list of JSON objects with "Description" field
     json_descriptions = [{"Description": desc} for desc in description_list]
@@ -179,7 +186,8 @@ async def _summarize_descriptions(
     )
 
     # Check summary token length against embedding limit
-    embedding_token_limit = global_config.get("embedding_token_limit")
+    embedding_service = global_config.get("embedding_service")
+    embedding_token_limit = getattr(embedding_service, "max_token_size", None)
     if embedding_token_limit is not None and summary:
         tokenizer = global_config["tokenizer"]
         summary_token_count = len(tokenizer.encode(summary))

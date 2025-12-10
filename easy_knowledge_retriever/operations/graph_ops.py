@@ -4,25 +4,26 @@ import time
 from collections import defaultdict, Counter
 from typing import Any
 
-from utils.logger import logger
-from utils.hashing import compute_mdhash_id
-from utils.vector_utils import (
+from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.hashing import compute_mdhash_id
+from easy_knowledge_retriever.utils.vector_utils import (
     safe_vdb_operation_with_exception,
     apply_source_ids_limit,
     merge_source_ids,
     make_relation_chunk_key,
 )
-from utils.common_utils import create_prefixed_exception
-from utils.text_utils import split_string_by_multi_markers
-from kg.base import BaseGraphStorage, BaseKVStorage, BaseVectorStorage
-from kg.concurrency import get_storage_keyed_lock
-from kg.exceptions import PipelineCancelledException
-from constants import (
+from easy_knowledge_retriever.utils.common_utils import create_prefixed_exception
+from easy_knowledge_retriever.utils.text_utils import split_string_by_multi_markers
+from easy_knowledge_retriever.kg.base import BaseGraphStorage, BaseKVStorage, BaseVectorStorage
+from easy_knowledge_retriever.kg.concurrency import get_storage_keyed_lock
+from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
+from easy_knowledge_retriever.constants import (
     GRAPH_FIELD_SEP,
     SOURCE_IDS_LIMIT_METHOD_KEEP,
     SOURCE_IDS_LIMIT_METHOD_FIFO,
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_FILE_PATH_MORE_PLACEHOLDER,
+    DEFAULT_MAX_ASYNC,
 )
 from easy_knowledge_retriever.operations.summarization import _handle_entity_relation_summary
 from easy_knowledge_retriever.operations.extraction import (
@@ -138,7 +139,9 @@ async def rebuild_knowledge_from_chunks(
                     pipeline_status["history_messages"].append(status_message)
             continue
 
-    graph_max_async = global_config.get("llm_model_max_async", 4) * 2
+    llm_service = global_config.get("llm_service")
+    max_async = getattr(llm_service, "max_async", 4)
+    graph_max_async = max_async * 2
     semaphore = asyncio.Semaphore(graph_max_async)
 
     rebuilt_entities_count = 0
@@ -1641,7 +1644,9 @@ async def merge_nodes_and_edges(
         pipeline_status["history_messages"].append(log_message)
 
     # Get max async tasks limit from global_config for semaphore control
-    graph_max_async = global_config.get("llm_model_max_async", 4) * 2
+    llm_service = global_config.get("llm_service")
+    max_async = getattr(llm_service, "max_async", 4)
+    graph_max_async = max_async * 2
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # ===== Phase 1: Process all entities concurrently =====

@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Any
-from utils.logger import logger
-from utils.tokenizer import Tokenizer
-from kg.exceptions import ChunkTokenLimitExceededError
+from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer
+from easy_knowledge_retriever.kg.exceptions import ChunkTokenLimitExceededError
 
 def chunking_by_token_size(
     tokenizer: Tokenizer,

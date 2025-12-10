@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Literal, overload
 
 import json_repair
 
-from kg.base import (
+from easy_knowledge_retriever.kg.base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
@@ -15,27 +15,27 @@ from kg.base import (
     QueryResult,
     QueryContextResult,
 )
-from utils.logger import logger
-from utils.hashing import compute_args_hash, compute_mdhash_id
-from utils.tokenizer import Tokenizer, truncate_list_by_token_size
-from utils.text_utils import split_string_by_multi_markers
-from utils.common_utils import (
+from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.hashing import compute_args_hash, compute_mdhash_id
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer, truncate_list_by_token_size
+from easy_knowledge_retriever.utils.text_utils import split_string_by_multi_markers
+from easy_knowledge_retriever.utils.common_utils import (
     convert_to_user_format,
     generate_reference_list_from_chunks,
 )
-from utils.vector_utils import (
+from easy_knowledge_retriever.utils.vector_utils import (
     pick_by_weighted_polling,
     pick_by_vector_similarity,
     process_retrieved_chunks,
 )
-from llm.utils import (
+from easy_knowledge_retriever.llm.utils import (
     handle_cache,
     save_to_cache,
     CacheData,
     remove_think_tags,
 )
-from llm.prompts import PROMPTS
-from constants import (
+from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.constants import (
     DEFAULT_MAX_TOTAL_TOKENS,
     DEFAULT_KG_CHUNK_PICK_METHOD,
     DEFAULT_RELATED_CHUNK_NUMBER,
@@ -96,7 +96,12 @@ async def extract_keywords_only(
         text,
     )
     cached_result = await handle_cache(
-        hashing_kv, args_hash, text, param.mode, cache_type="keywords"
+        hashing_kv,
+        args_hash,
+        text,
+        param.mode,
+        cache_type="keywords",
+        enable_cache=global_config.get("enable_llm_cache", True),
     )
     if cached_result is not None:
         cached_response, _ = cached_result  # Extract content, ignore timestamp
@@ -113,7 +118,7 @@ async def extract_keywords_only(
     # 2. Build the examples
     examples = "\n".join(PROMPTS["keywords_extraction_examples"])
 
-    language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
+    language = global_config.get("language", DEFAULT_SUMMARY_LANGUAGE)
 
     # 3. Build the keyword-extraction prompt
     kw_prompt = PROMPTS["keywords_extraction"].format(
@@ -159,7 +164,7 @@ async def extract_keywords_only(
             "high_level_keywords": hl_keywords,
             "low_level_keywords": ll_keywords,
         }
-        if hashing_kv.global_config.get("enable_llm_cache"):
+        if global_config.get("enable_llm_cache"):
             # Save to cache with query parameters
             queryparam_dict = {
                 "mode": param.mode,
@@ -363,6 +368,7 @@ async def _find_related_text_unit_from_entities(
     query_param: QueryParam,
     text_chunks_db: BaseKVStorage,
     knowledge_graph_inst: BaseGraphStorage,
+    global_config: dict[str, str],
     query: str = None,
     chunks_vdb: BaseVectorStorage = None,
     chunk_tracking: dict = None,
@@ -400,10 +406,10 @@ async def _find_related_text_unit_from_entities(
         logger.warning("No entities with text chunks found")
         return []
 
-    kg_chunk_pick_method = text_chunks_db.global_config.get(
+    kg_chunk_pick_method = global_config.get(
         "kg_chunk_pick_method", DEFAULT_KG_CHUNK_PICK_METHOD
     )
-    max_related_chunks = text_chunks_db.global_config.get(
+    max_related_chunks = global_config.get(
         "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
     )
 
@@ -610,6 +616,7 @@ async def _find_related_text_unit_from_relations(
     edge_datas: list[dict],
     query_param: QueryParam,
     text_chunks_db: BaseKVStorage,
+    global_config: dict[str, str],
     entity_chunks: list[dict] = None,
     query: str = None,
     chunks_vdb: BaseVectorStorage = None,
@@ -656,10 +663,10 @@ async def _find_related_text_unit_from_relations(
         logger.warning("No relation-related chunks found")
         return []
 
-    kg_chunk_pick_method = text_chunks_db.global_config.get(
+    kg_chunk_pick_method = global_config.get(
         "kg_chunk_pick_method", DEFAULT_KG_CHUNK_PICK_METHOD
     )
-    max_related_chunks = text_chunks_db.global_config.get(
+    max_related_chunks = global_config.get(
         "related_chunk_number", DEFAULT_RELATED_CHUNK_NUMBER
     )
 
@@ -818,6 +825,7 @@ async def _perform_kg_search(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
+    global_config: dict[str, str],
     chunks_vdb: BaseVectorStorage = None,
 ) -> dict[str, Any]:
     """
@@ -839,7 +847,7 @@ async def _perform_kg_search(
     chunk_tracking = {}  # chunk_id -> {source, frequency, order}
 
     # Pre-compute query embedding once for all vector operations
-    kg_chunk_pick_method = text_chunks_db.global_config.get(
+    kg_chunk_pick_method = global_config.get(
         "kg_chunk_pick_method", DEFAULT_KG_CHUNK_PICK_METHOD
     )
     query_embedding = None
@@ -1151,6 +1159,7 @@ async def _merge_all_chunks(
     filtered_entities: list[dict],
     filtered_relations: list[dict],
     vector_chunks: list[dict],
+    global_config: dict[str, str],
     query: str = "",
     knowledge_graph_inst: BaseGraphStorage = None,
     text_chunks_db: BaseKVStorage = None,
@@ -1173,6 +1182,7 @@ async def _merge_all_chunks(
             query_param,
             text_chunks_db,
             knowledge_graph_inst,
+            global_config,
             query,
             chunks_vdb,
             chunk_tracking=chunk_tracking,
@@ -1186,6 +1196,7 @@ async def _merge_all_chunks(
             filtered_relations,
             query_param,
             text_chunks_db,
+            global_config,
             entity_chunks,  # For deduplication
             query,
             chunks_vdb,
@@ -1422,6 +1433,7 @@ async def _build_query_context(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage,
     query_param: QueryParam,
+    global_config: dict[str, str],
     chunks_vdb: BaseVectorStorage = None,
 ) -> QueryContextResult | None:
     """
@@ -1445,6 +1457,7 @@ async def _build_query_context(
         relationships_vdb,
         text_chunks_db,
         query_param,
+        global_config,
         chunks_vdb,
     )
 
@@ -1459,7 +1472,7 @@ async def _build_query_context(
     truncation_result = await _apply_token_truncation(
         search_result,
         query_param,
-        text_chunks_db.global_config,
+        global_config,
     )
 
     # Stage 3: Merge chunks using filtered entities/relations
@@ -1467,6 +1480,7 @@ async def _build_query_context(
         filtered_entities=truncation_result["filtered_entities"],
         filtered_relations=truncation_result["filtered_relations"],
         vector_chunks=search_result["vector_chunks"],
+        global_config=global_config,
         query=query,
         knowledge_graph_inst=knowledge_graph_inst,
         text_chunks_db=text_chunks_db,
@@ -1491,7 +1505,7 @@ async def _build_query_context(
         merged_chunks=merged_chunks,
         query=query,
         query_param=query_param,
-        global_config=text_chunks_db.global_config,
+        global_config=global_config,
         chunk_tracking=search_result["chunk_tracking"],
         entity_id_to_original=truncation_result["entity_id_to_original"],
         relation_id_to_original=truncation_result["relation_id_to_original"],
@@ -1617,6 +1631,7 @@ async def kg_query(
         relationships_vdb,
         text_chunks_db,
         query_param,
+        global_config,
         chunks_vdb,
     )
 
@@ -1693,7 +1708,7 @@ async def kg_query(
             stream=query_param.stream,
         )
 
-        if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
+        if hashing_kv and global_config.get("enable_llm_cache"):
             queryparam_dict = {
                 "mode": query_param.mode,
                 "response_type": query_param.response_type,
@@ -1967,7 +1982,7 @@ async def naive_query(
             stream=query_param.stream,
         )
 
-        if hashing_kv and hashing_kv.global_config.get("enable_llm_cache"):
+        if hashing_kv and global_config.get("enable_llm_cache"):
             queryparam_dict = {
                 "mode": query_param.mode,
                 "response_type": query_param.response_type,

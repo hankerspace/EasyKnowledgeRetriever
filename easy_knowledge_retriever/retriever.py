@@ -24,13 +24,14 @@ from typing import (
     Dict,
     Union,
 )
-from utils.logger import logger, set_verbose_debug
-from utils.hashing import compute_mdhash_id, generate_track_id
-from utils.file_utils import load_json, write_json
-from llm.utils import EmbeddingFunc
-from llm.prompts import PROMPTS
-from kg.exceptions import PipelineCancelledException
-from constants import (
+from easy_knowledge_retriever.utils.logger import logger, set_verbose_debug
+from easy_knowledge_retriever.utils.hashing import compute_mdhash_id, generate_track_id
+from easy_knowledge_retriever.utils.file_utils import load_json, write_json
+from easy_knowledge_retriever.llm.utils import EmbeddingFunc
+from easy_knowledge_retriever.llm.service import BaseLLMService, BaseEmbeddingService
+from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
+from easy_knowledge_retriever.constants import (
     DEFAULT_MAX_GLEANING,
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
     DEFAULT_TOP_K,
@@ -55,41 +56,27 @@ from constants import (
 
 
 
-from kg.registry import (
+from easy_knowledge_retriever.kg.registry import (
     STORAGES,
     verify_storage_implementation,
 )
-from config.global_config import GlobalConfig
-from factories.storage_factory import StorageFactory
-from config.llm_config import (
-    LLMConfig,
-    DEFAULT_SUMMARY_MAX_TOKENS,
-    DEFAULT_SUMMARY_CONTEXT_SIZE,
-    DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
-    DEFAULT_MAX_ASYNC,
-    DEFAULT_LLM_TIMEOUT,
-)
-from config.embedding_config import (
-    EmbeddingConfig,
-    DEFAULT_EMBEDDING_BATCH_NUM,
-    DEFAULT_EMBEDDING_FUNC_MAX_ASYNC,
-    DEFAULT_EMBEDDING_TIMEOUT,
-)
-from config.rerank_config import RerankConfig
+from easy_knowledge_retriever.config.global_config import GlobalConfig
+
+from easy_knowledge_retriever.config.rerank_config import RerankConfig
 
 
 
-from kg.shared_memory import (
+from easy_knowledge_retriever.kg.shared_memory import (
     get_namespace_data,
     get_default_workspace,
     set_default_workspace,
 )
-from kg.concurrency import (
+from easy_knowledge_retriever.kg.concurrency import (
     get_data_init_lock,
     get_namespace_lock,
 )
 
-from kg.base import (
+from easy_knowledge_retriever.kg.base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,
@@ -103,7 +90,17 @@ from kg.base import (
 
     QueryResult,
 )
-from kg.namespace import NameSpace
+from easy_knowledge_retriever.kg.services import (
+    BaseKVStorageService,
+    BaseVectorStorageService,
+    BaseGraphStorageService,
+    BaseDocStatusStorageService,
+    KVStorageService,
+    VectorStorageService,
+    GraphStorageService,
+    DocStatusStorageService
+)
+from easy_knowledge_retriever.kg.namespace import NameSpace
 from easy_knowledge_retriever.operations.chunking import chunking_by_token_size
 from easy_knowledge_retriever.operations.extraction import extract_entities
 from easy_knowledge_retriever.operations.graph_ops import (
@@ -114,24 +111,24 @@ from easy_knowledge_retriever.operations.query import (
     kg_query,
     naive_query,
 )
-from constants import GRAPH_FIELD_SEP
-from utils.tokenizer import Tokenizer, TiktokenTokenizer
-from utils.async_utils import (
+from easy_knowledge_retriever.constants import GRAPH_FIELD_SEP
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer, TiktokenTokenizer
+from easy_knowledge_retriever.utils.async_utils import (
     always_get_an_event_loop,
     priority_limit_async_func_call,
 )
-from utils.common_utils import (
+from easy_knowledge_retriever.utils.common_utils import (
     lazy_external_import,
     check_storage_env_vars,
     convert_to_user_format,
 )
-from utils.vector_utils import (
+from easy_knowledge_retriever.utils.vector_utils import (
     subtract_source_ids,
     make_relation_chunk_key,
     normalize_source_ids_limit_method,
 )
-from utils.text_utils import sanitize_text_for_encoding, get_content_summary
-from kg.types import KnowledgeGraph
+from easy_knowledge_retriever.utils.text_utils import sanitize_text_for_encoding, get_content_summary
+from easy_knowledge_retriever.kg.types import KnowledgeGraph
 
 
 
@@ -149,16 +146,16 @@ class EasyKnowledgeRetriever:
     # Storage
     # ---
 
-    kv_storage: str = field(default="JsonKVStorage")
+    kv_storage: Union[str, BaseKVStorageService, BaseKVStorage] = field(default="JsonKVStorage")
     """Storage backend for key-value data."""
 
-    vector_storage: str = field(default="NanoVectorDBStorage")
+    vector_storage: Union[str, BaseVectorStorageService, BaseVectorStorage] = field(default="NanoVectorDBStorage")
     """Storage backend for vector embeddings."""
 
-    graph_storage: str = field(default="NetworkXStorage")
+    graph_storage: Union[str, BaseGraphStorageService, BaseGraphStorage] = field(default="NetworkXStorage")
     """Storage backend for knowledge graphs."""
 
-    doc_status_storage: str = field(default="JsonDocStatusStorage")
+    doc_status_storage: Union[str, BaseDocStatusStorageService, DocStatusStorage] = field(default="JsonDocStatusStorage")
     """Storage type for tracking document processing statuses."""
 
     # Workspace
@@ -281,78 +278,28 @@ class EasyKnowledgeRetriever:
     Defaults to `chunking_by_token_size` if not specified.
     """
 
+
     # Embedding
     # ---
 
-    embedding_func: BaseEmbeddingService | None = field(default=None)
-    """Function for computing text embeddings. Must be set before use."""
+    embedding_service: BaseEmbeddingService | None = field(default=None)
+    """Service for computing text embeddings. Must be set before use."""
 
-    embedding_token_limit: int | None = field(default=None, init=False)
-    """Token limit for embedding model. Set automatically from embedding_func.max_token_size in __post_init__."""
+    embedding_func: Callable | None = field(default=None, init=False)
+    """Function derived from embedding_service. Init=False as it's set in post_init."""
 
-    embedding_batch_num: int = field(default=DEFAULT_EMBEDDING_BATCH_NUM)
-    """Batch size for embedding computations."""
 
-    embedding_func_max_async: int = field(
-        default=DEFAULT_EMBEDDING_FUNC_MAX_ASYNC
-    )
-    """Maximum number of concurrent embedding function calls."""
-
-    embedding_cache_config: dict[str, Any] = field(
-        default_factory=lambda: {
-            "enabled": False,
-            "similarity_threshold": 0.95,
-            "use_llm_check": False,
-        }
-    )
-    """Configuration for embedding cache.
-    - enabled: If True, enables caching to avoid redundant computations.
-    - similarity_threshold: Minimum similarity score to use cached embeddings.
-    - use_llm_check: If True, validates cached embeddings using an LLM.
-    """
-
-    default_embedding_timeout: int = field(
-        default=DEFAULT_EMBEDDING_TIMEOUT
-    )
 
     # LLM Configuration
     # ---
 
-    llm_model_func: BaseLLMService | None = field(default=None)
-    """Function for interacting with the large language model (LLM). Must be set before use."""
+    llm_service: BaseLLMService | None = field(default=None)
+    """Service for interacting with the large language model (LLM). Must be set before use."""
 
-    llm_model_name: str = field(default="gpt-4o-mini")
-    """Name of the LLM model used for generating responses."""
+    llm_model_func: Callable | None = field(default=None, init=False)
+    """Function derived from easy_knowledge_retriever.llm_service. Init=False as it's set in post_init."""
 
-    summary_max_tokens: int = field(
-        default=DEFAULT_SUMMARY_MAX_TOKENS
-    )
-    """Maximum tokens allowed for entity/relation description."""
 
-    summary_context_size: int = field(
-        default=DEFAULT_SUMMARY_CONTEXT_SIZE
-    )
-    """Maximum number of tokens allowed per LLM response."""
-
-    summary_length_recommended: int = field(
-        default=DEFAULT_SUMMARY_LENGTH_RECOMMENDED
-    )
-    """Recommended length of LLM summary output."""
-
-    llm_model_max_async: int = field(
-        default=DEFAULT_MAX_ASYNC
-    )
-    """Maximum number of concurrent LLM calls."""
-
-    llm_model_kwargs: dict[str, Any] = field(default_factory=dict)
-    """Additional keyword arguments passed to the LLM model function."""
-
-    llm_config: Dict[str, Any] = field(default_factory=dict)
-    """Configuration for LLM and embedding models (e.g. {'api_key': ..., 'base_url': ...})."""
-
-    default_llm_timeout: int = field(
-        default=DEFAULT_LLM_TIMEOUT
-    )
 
     # Rerank Configuration
     # ---
@@ -366,11 +313,6 @@ class EasyKnowledgeRetriever:
     # Storage
     # ---
 
-    storage_config: Dict[str, Any] = field(default_factory=dict)
-    """Configuration for all storage backends (e.g. {'milvus': {'uri': ...}, 'neo4j': ...})."""
-
-    vector_db_storage_cls_kwargs: dict[str, Any] = field(default_factory=dict)
-    """Additional parameters for vector database storage."""
 
     enable_llm_cache: bool = field(default=True)
     """Enables caching for LLM responses to avoid redundant computations."""
@@ -416,19 +358,8 @@ class EasyKnowledgeRetriever:
     file_path_more_placeholder: str = field(default=DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
     """Placeholder text when file paths exceed max_file_paths limit."""
 
-    addon_params: dict[str, Any] = field(
-        default_factory=lambda: {
-            "language": DEFAULT_SUMMARY_LANGUAGE,
-            "entity_types": DEFAULT_ENTITY_TYPES,
-        }
-    )
-
-    # Storages Management
-    # ---
-
-    # TODO: Deprecated (EasyKnowledgeRetriever will never initialize storage automatically on creation，and finalize should be call before destroying)
-    auto_manage_storages_states: bool = field(default=False)
-    """If True, easy_knowledge_retriever will automatically calls initialize_storages and finalize_storages at the appropriate times."""
+    language: str = DEFAULT_SUMMARY_LANGUAGE
+    entity_types: List[str] = field(default_factory=lambda: DEFAULT_ENTITY_TYPES)
 
     cosine_better_than_threshold: float = field(
         default=0.2
@@ -467,22 +398,15 @@ class EasyKnowledgeRetriever:
         global_config_keys = GlobalConfig.__dataclass_fields__.keys()
         global_config_data = {k: v for k, v in current_config_dict.items() if k in global_config_keys}
         
-        # Fix for embedding token limit which is init=False
-        if "embedding_token_limit" in global_config_data:
-             del global_config_data["embedding_token_limit"]
              
         self._global_config_obj = GlobalConfig(**global_config_data)
 
-        # Initialize Storage Factory
-        self._storage_factory = StorageFactory(self._global_config_obj)
-
-        from kg.shared_memory import (
+        from easy_knowledge_retriever.kg.shared_memory import (
             initialize_share_data,
         )
 
         # Merge llm_config into llm_model_kwargs
-        if self.llm_config:
-            self.llm_model_kwargs = {**self.llm_config, **self.llm_model_kwargs}
+
 
         # Handle deprecated parameters
         if self.log_level is not None:
@@ -518,13 +442,9 @@ class EasyKnowledgeRetriever:
 
         for storage_type, storage_name in storage_configs:
             # Verify storage implementation compatibility
-            verify_storage_implementation(storage_type, storage_name)
+            if isinstance(storage_name, str):
+                verify_storage_implementation(storage_type, storage_name)
 
-        # Ensure vector_db_storage_cls_kwargs has required fields
-        self.vector_db_storage_cls_kwargs = {
-            "cosine_better_than_threshold": self.cosine_better_than_threshold,
-            **self.vector_db_storage_cls_kwargs,
-        }
 
         # Init Tokenizer
         # Post-initialization hook to handle backward compatabile tokenizer initialization based on provided parameters
@@ -541,14 +461,8 @@ class EasyKnowledgeRetriever:
             logger.warning(
                 f"force_llm_summary_on_merge should be at least 3, got {self.force_llm_summary_on_merge}"
             )
-        if self.summary_context_size > self.max_total_tokens:
-            logger.warning(
-                f"summary_context_size({self.summary_context_size}) should no greater than max_total_tokens({self.max_total_tokens})"
-            )
-        if self.summary_length_recommended > self.summary_max_tokens:
-            logger.warning(
-                f"max_total_tokens({self.summary_max_tokens}) should greater than summary_length_recommended({self.summary_length_recommended})"
-            )
+        
+        # Validations involving LLM configs are deferred or skipped as those configs are now in llm_service
 
         # Fix global_config now
         global_config = asdict(self)
@@ -557,147 +471,181 @@ class EasyKnowledgeRetriever:
         logger.debug(f"EasyKnowledgeRetriever init with param:\n  {_print_config}\n")
 
         # Init Embedding
-        # Step 1: Capture max_token_size before applying decorator (decorator strips dataclass attributes)
-        embedding_max_token_size = None
-        if self.embedding_func and hasattr(self.embedding_func, "max_token_size"):
-            embedding_max_token_size = self.embedding_func.max_token_size
-            logger.debug(
-                f"Captured embedding max_token_size: {embedding_max_token_size}"
-            )
-        self.embedding_token_limit = embedding_max_token_size
-
-        # Step 2: Apply priority wrapper decorator
-        if self.embedding_func:
+        if self.embedding_service:
+            # Set embedding_func from service
+            self.embedding_func = self.embedding_service
+            
+            # Apply priority wrapper decorator
             self.embedding_func = priority_limit_async_func_call(
-                self.embedding_func_max_async,
-                llm_timeout=self.default_embedding_timeout,
+                self.embedding_service.max_async,
+                llm_timeout=self.embedding_service.timeout,
                 queue_name="Embedding func",
             )(self.embedding_func)
+            
+            logger.debug(f"Initialized embedding_func from service with max_async={self.embedding_service.max_async}")
 
 
-        # Initialize all storages using Factory
-        # Initialize all storages using Factory
+        # Initialize all storages using Factory (Service pattern)
+
+        # Prepare config with tokenizer for storages
+        storage_config_dict = self._global_config_obj.to_dict()
+        storage_config_dict["tokenizer"] = self.tokenizer
+
+        # Update existing services configurations if they were passed as objects
+        # This is critical when services are injected (e.g. from Factory) but created with a GlobalConfig that lacks tokenizer
+        services_to_update = [
+            self.kv_storage,
+            self.vector_storage,
+            self.graph_storage,
+            self.doc_status_storage
+        ]
         
-        # 1. Assign classes (for introspection/compatibility)
-        self.key_string_value_json_storage_cls = self._storage_factory._get_storage_class(self.kv_storage)
-        self.vector_db_storage_cls = self._storage_factory._get_storage_class(self.vector_storage)
-        self.graph_storage_cls = self._storage_factory._get_storage_class(self.graph_storage)
-        self.doc_status_storage_cls = self._storage_factory._get_storage_class(self.doc_status_storage)
-        
-        
-        # Usage later: self.key_string_value_json_storage_cls(namespace=...) -> returns instance
-        
-        # So yes, partial(factory_method, storage_name=self.kv_storage) returns a callable that accepts other kwargs and returns instance. 
-        # This matches the signature expected by usage later.
+        for service in services_to_update:
+            if not isinstance(service, str) and hasattr(service, 'global_config') and isinstance(service.global_config, dict):
+                 if "tokenizer" not in service.global_config or service.global_config["tokenizer"] is None:
+                     service.global_config["tokenizer"] = self.tokenizer
+                     logger.debug(f"Injected tokenizer into existing service {service.__class__.__name__}")
 
+        # 1. Initialize Services from strings if necessary (Legacy/Config support)
+        if isinstance(self.kv_storage, str):
+            self.kv_storage = KVStorageService(self.kv_storage, storage_config_dict, self.workspace)
+        
+        if isinstance(self.vector_storage, str):
+            cosine_threshold = self.cosine_better_than_threshold
+            self.vector_storage = VectorStorageService(
+                self.vector_storage, 
+                storage_config_dict, 
+                self.workspace, 
+                cosine_better_than_threshold=cosine_threshold
+            )
 
-        # Initialize document status storage
-        self.doc_status_storage_cls = partial(
-            self._storage_factory.create_doc_status_storage,
-            storage_name=self.doc_status_storage
-        )
+        if isinstance(self.graph_storage, str):
+            self.graph_storage = GraphStorageService(self.graph_storage, storage_config_dict, self.workspace)
 
-        self.llm_response_cache: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        if isinstance(self.doc_status_storage, str):
+            self.doc_status_storage = DocStatusStorageService(self.doc_status_storage, storage_config_dict, self.workspace)
+
+        # 2. Create actual storage instances using services
+        
+        # KV Storages
+        self.llm_response_cache: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_LLM_RESPONSE_CACHE,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.text_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_TEXT_CHUNKS,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.full_docs: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.full_docs: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_DOCS,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.full_entities: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.full_entities: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_ENTITIES,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.full_relations: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.full_relations: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_RELATIONS,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.entity_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.entity_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_ENTITY_CHUNKS,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.relation_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
+        self.relation_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_RELATION_CHUNKS,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.chunk_entity_relation_graph: BaseGraphStorage = self.graph_storage_cls(  # type: ignore
+        # Graph Storage
+        self.chunk_entity_relation_graph: BaseGraphStorage = self.graph_storage.create(
             namespace=NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        self.entities_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
+        # Vector Storages
+        # Prepare vector storage kwargs including cosine threshold
+        cosine_threshold = self.cosine_better_than_threshold
+        embedding_dim = getattr(self.embedding_service, "embedding_dim", 1536) if self.embedding_service else 1536
+        
+        self.entities_vdb: BaseVectorStorage = self.vector_storage.create(
             namespace=NameSpace.VECTOR_STORE_ENTITIES,
-            workspace=self.workspace,
-            global_config=global_config,
             embedding_func=self.embedding_func,
             meta_fields={"entity_name", "source_id", "content", "file_path"},
-        )
-        self.relationships_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
-            namespace=NameSpace.VECTOR_STORE_RELATIONSHIPS,
+            cosine_better_than_threshold=cosine_threshold,
+            embedding_dim=embedding_dim,
+            working_dir=self.working_dir,
             workspace=self.workspace,
-            global_config=global_config,
+        )
+        self.relationships_vdb: BaseVectorStorage = self.vector_storage.create(
+            namespace=NameSpace.VECTOR_STORE_RELATIONSHIPS,
             embedding_func=self.embedding_func,
             meta_fields={"src_id", "tgt_id", "source_id", "content", "file_path"},
-        )
-        self.chunks_vdb: BaseVectorStorage = self.vector_db_storage_cls(  # type: ignore
-            namespace=NameSpace.VECTOR_STORE_CHUNKS,
+            cosine_better_than_threshold=cosine_threshold,
+            embedding_dim=embedding_dim,
+            working_dir=self.working_dir,
             workspace=self.workspace,
-            global_config=global_config,
+        )
+        self.chunks_vdb: BaseVectorStorage = self.vector_storage.create(
+            namespace=NameSpace.VECTOR_STORE_CHUNKS,
             embedding_func=self.embedding_func,
             meta_fields={"full_doc_id", "content", "file_path"},
+            cosine_better_than_threshold=cosine_threshold,
+            embedding_dim=embedding_dim,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
-        # Initialize document status storage
-        self.doc_status: DocStatusStorage = self.doc_status_storage_cls(
+        # Doc Status Storage
+        self.doc_status: DocStatusStorage = self.doc_status_storage.create(
             namespace=NameSpace.DOC_STATUS,
-            workspace=self.workspace,
             embedding_func=None,
+            working_dir=self.working_dir,
+            workspace=self.workspace,
         )
 
         # Directly use llm_response_cache, don't create a new object
         hashing_kv = self.llm_response_cache
 
         # Get timeout from LLM model kwargs for dynamic timeout calculation
-        if self.llm_model_func:
+        # Get timeout from LLM model kwargs for dynamic timeout calculation
+        if self.llm_service:
+            # Set llm_model_func from service
+            self.llm_model_func = self.llm_service
+            
             self.llm_model_func = priority_limit_async_func_call(
-                self.llm_model_max_async,
-                llm_timeout=self.default_llm_timeout,
+                self.llm_service.max_async,
+                llm_timeout=self.llm_service.timeout,
                 queue_name="LLM func",
             )(
                 partial(
-                    self.llm_model_func,  # type: ignore
+                    self.llm_service,  # type: ignore
                     hashing_kv=hashing_kv,
-                    **self.llm_model_kwargs,
                 )
             )
+            logger.debug(f"Initialized llm_model_func from service with max_async={self.llm_service.max_async}")
 
         self._storages_status = StoragesStatus.CREATED
 
@@ -716,7 +664,7 @@ class EasyKnowledgeRetriever:
                 )
 
             # Auto-initialize pipeline_status for this workspace
-            from kg.shared_memory import initialize_pipeline_status
+            from easy_knowledge_retriever.kg.shared_memory import initialize_pipeline_status
 
             await initialize_pipeline_status(workspace=self.workspace)
 
@@ -1124,23 +1072,23 @@ class EasyKnowledgeRetriever:
     def _get_storage_class(self, storage_name: str) -> Callable[..., Any]:
         # Direct imports for default storage implementations
         if storage_name == "JsonKVStorage":
-            from kg.json_kv_impl import JsonKVStorage
+            from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
 
             return JsonKVStorage
         elif storage_name == "NanoVectorDBStorage":
-            from kg.nano_vector_db_impl import NanoVectorDBStorage
+            from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
 
             return NanoVectorDBStorage
         elif storage_name == "NetworkXStorage":
-            from kg.networkx_impl import NetworkXStorage
+            from easy_knowledge_retriever.kg.networkx_impl import NetworkXStorage
 
             return NetworkXStorage
         elif storage_name == "JsonDocStatusStorage":
-            from kg.json_doc_status_impl import JsonDocStatusStorage
+            from easy_knowledge_retriever.kg.json_doc_status_impl import JsonDocStatusStorage
 
             return JsonDocStatusStorage
         elif storage_name == "MilvusVectorDBStorage":
-            from kg.milvus_impl import MilvusVectorDBStorage
+            from easy_knowledge_retriever.kg.milvus_impl import MilvusVectorDBStorage
 
             return MilvusVectorDBStorage
         else:
@@ -1197,6 +1145,7 @@ class EasyKnowledgeRetriever:
         """
         import os
         from easy_knowledge_retriever.operations.mineru_parser import MineruParser
+        from easy_knowledge_retriever.operations.image_processing import ImageSummarizer
 
         # Use a subdirectory in working_dir for parsed docs
         parsed_docs_dir = os.path.join(self.working_dir, "parsed_docs")
@@ -1205,9 +1154,90 @@ class EasyKnowledgeRetriever:
 
         parser = MineruParser(output_dir=parsed_docs_dir)
         try:
-            print(f"Parsing document: {file_path}...")
-            parsed_data = parser.parse(file_path, **kwargs)
+            # Check if document has already been parsed.
+            # Mineru creates a directory structure: working_dir / file_stem / 'auto' / file_stem_content_list.json
+            import pathlib
+            file_path_obj = pathlib.Path(file_path)
+            file_stem = file_path_obj.stem
+            expected_output_json = pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json"
             
+            parsed_data = None
+            if expected_output_json.exists():
+                print(f"Document already parsed: {file_path}. Loading existing data...")
+                # We need to reuse the parser's logic to process the content list, 
+                # but parser.parse runs the command. 
+                # Let's extract the loading logic or just use a helper method.
+                # Accessing private method _process_content_list is acceptable here as they are in same package/ownership.
+                try:
+                    import json
+                    with open(expected_output_json, "r", encoding="utf-8") as f:
+                        content_list = json.load(f)
+                    parsed_data = parser._process_content_list(content_list, expected_output_json.parent)
+                    print("Loaded existing parsed data.")
+                except Exception as e:
+                    print(f"Failed to load existing parsed data, re-parsing: {e}")
+            
+            if parsed_data is None:
+                print(f"Parsing document: {file_path}...")
+                parsed_data = parser.parse(file_path, **kwargs)
+            
+            # --- Multimodal Processing (Image Summarization) ---
+            if self.llm_model_func:
+                # We need the underlying LLM service method to pass 'messages'
+                # self.llm_model_func is wrapped by priority_limit_async_func_call
+                # and partial. We assume the underlying func or the partial
+                # can accept 'messages' as we implemented in OpenAILLMService.
+                
+                # Check if we can unwrap or use the wrapped function directly.
+                # The priority_wrapper calls `await func(*args, **kwargs)`.
+                # So if we pass messages kwarg, it should propagate.
+                
+                # However, ImageSummarizer expects a specific signature protocol.
+                # Let's verify if `self.llm_model_func` is sufficient or if we need access 
+                # to the original Service object.
+                # The typical pattern in this codebase is to use `llm_model_func` for generic generation.
+                # But ImageSummarizer needs high control over message structure.
+                
+                # If llm_model_func is a partial wrapping OpenAI service, it should work.
+                
+                # Create a wrapper or adapter if needed.
+                # Here we pass self.llm_model_func which is async and accepts kwargs.
+                
+                print("Processing images with VLM...")
+                summarizer = ImageSummarizer(self.llm_model_func)
+                
+                # Iterate over pages to associate images with page numbers
+                if "pages" in parsed_data:
+                    for page in parsed_data["pages"]:
+                        page_num = page.get("page_number", 0)
+                        images = page.get("images", [])
+                        
+                        for img_path in images:
+                            print(f"Summarizing image on page {page_num}: {img_path}")
+                            summary = await summarizer.summarize(img_path)
+                            
+                            if summary and not summary.startswith("[Error"):
+                                # Create a text chunk for the image summary
+                                # We append it to the page's content so it gets chunked naturally?
+                                # OR we add it as a separate modality block?
+                                
+                                # Option A: Append to page content (Simplest for retrieval)
+                                # " [IMAGE SUMMARY: ... ] "
+                                image_context = f"\n\n[IMAGE on Page {page_num}]\nSummary: {summary}\nImage Path: {img_path}\n"
+                                page["content"] += image_context
+                                
+                                # Also update main content if it matters (usually main content is concatenation of pages)
+                                # But ainsert likely uses pages if provided?
+                                # Let's check ainsert logic. It uses chunking_func which likely uses full_text or pages.
+                                # Actually chunking_by_token_size uses 'content' key of each page if 'pages' is provided.
+                                
+                                # So appending to page["content"] is correct.
+                                pass
+                
+                # Re-construct full text content from updated pages to keep consistency
+                parsed_data["content"] = "\n".join([p.get("content", "") for p in parsed_data.get("pages", [])])
+
+
             print(f"Indexing document content...")
             # ingest into RAG
             # We wrap input in list as ainsert expects a list of documents
@@ -3768,7 +3798,7 @@ class EasyKnowledgeRetriever:
         Returns:
             DeletionResult: An object containing the outcome of the deletion process.
         """
-        from kg.utils_graph import adelete_by_entity
+        from easy_knowledge_retriever.kg.utils_graph import adelete_by_entity
 
         return await adelete_by_entity(
             self.chunk_entity_relation_graph,
@@ -3801,7 +3831,7 @@ class EasyKnowledgeRetriever:
         Returns:
             DeletionResult: An object containing the outcome of the deletion process.
         """
-        from kg.utils_graph import adelete_by_relation
+        from easy_knowledge_retriever.kg.utils_graph import adelete_by_relation
         return await adelete_by_relation(
             self.chunk_entity_relation_graph,
             self.relationships_vdb,
@@ -3851,7 +3881,7 @@ class EasyKnowledgeRetriever:
         self, entity_name: str, include_vector_data: bool = False
     ) -> dict[str, str | None | dict[str, str]]:
         """Get detailed information of an entity"""
-        from kg.utils_graph import get_entity_info
+        from easy_knowledge_retriever.kg.utils_graph import get_entity_info
 
         return await get_entity_info(
             self.chunk_entity_relation_graph,
@@ -3864,7 +3894,7 @@ class EasyKnowledgeRetriever:
         self, src_entity: str, tgt_entity: str, include_vector_data: bool = False
     ) -> dict[str, str | None | dict[str, str]]:
         """Get detailed information of a relationship"""
-        from kg.utils_graph import get_relation_info
+        from easy_knowledge_retriever.kg.utils_graph import get_relation_info
 
         return await get_relation_info(
             self.chunk_entity_relation_graph,
@@ -3895,7 +3925,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing updated entity information
         """
-        from kg.utils_graph import aedit_entity
+        from easy_knowledge_retriever.kg.utils_graph import aedit_entity
 
         return await aedit_entity(
             self.chunk_entity_relation_graph,
@@ -3937,7 +3967,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing updated relation information
         """
-        from kg.utils_graph import aedit_relation
+        from easy_knowledge_retriever.kg.utils_graph import aedit_relation
 
         return await aedit_relation(
             self.chunk_entity_relation_graph,
@@ -3971,7 +4001,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing created entity information
         """
-        from kg.utils_graph import acreate_entity
+        from easy_knowledge_retriever.kg.utils_graph import acreate_entity
 
         return await acreate_entity(
             self.chunk_entity_relation_graph,
@@ -4002,7 +4032,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing created relation information
         """
-        from kg.utils_graph import acreate_relation
+        from easy_knowledge_retriever.kg.utils_graph import acreate_relation
 
         return await acreate_relation(
             self.chunk_entity_relation_graph,
@@ -4048,7 +4078,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing the merged entity information
         """
-        from kg.utils_graph import amerge_entities
+        from easy_knowledge_retriever.kg.utils_graph import amerge_entities
 
         return await amerge_entities(
             self.chunk_entity_relation_graph,
@@ -4094,7 +4124,7 @@ class EasyKnowledgeRetriever:
                 - table: Print formatted tables to console
             include_vector_data: Whether to include data from the vector database.
         """
-        from utils.vector_utils import aexport_data as utils_aexport_data
+        from easy_knowledge_retriever.utils.vector_utils import aexport_data as utils_aexport_data
 
         await utils_aexport_data(
             self.chunk_entity_relation_graph,

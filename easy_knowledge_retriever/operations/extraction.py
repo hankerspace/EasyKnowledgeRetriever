@@ -2,23 +2,24 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 from collections import defaultdict
-from utils.logger import logger
-from utils.text_utils import (
+from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.text_utils import (
     sanitize_and_normalize_extracted_text,
     split_string_by_multi_markers,
     fix_tuple_delimiter_corruption,
     is_float_regex,
 )
-from utils.common_utils import update_chunk_cache_list, create_prefixed_exception
-from constants import (
+from easy_knowledge_retriever.utils.common_utils import update_chunk_cache_list, create_prefixed_exception
+from easy_knowledge_retriever.constants import (
     DEFAULT_ENTITY_NAME_MAX_LENGTH,
     DEFAULT_SUMMARY_LANGUAGE,
     DEFAULT_ENTITY_TYPES,
+    DEFAULT_MAX_ASYNC,
 )
-from llm.prompts import PROMPTS
-from llm.utils import use_llm_func_with_cache, pack_user_ass_to_openai_messages
-from kg.base import BaseKVStorage, TextChunkSchema
-from kg.exceptions import PipelineCancelledException
+from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.llm.utils import use_llm_func_with_cache, pack_user_ass_to_openai_messages
+from easy_knowledge_retriever.kg.base import BaseKVStorage, TextChunkSchema
+from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
 
 def _truncate_entity_identifier(
     identifier: str, limit: int, chunk_key: str, identifier_role: str
@@ -431,10 +432,8 @@ async def extract_entities(
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
-    language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
-    entity_types = global_config["addon_params"].get(
-        "entity_types", DEFAULT_ENTITY_TYPES
-    )
+    language = global_config.get("language", DEFAULT_SUMMARY_LANGUAGE)
+    entity_types = global_config.get("entity_types", DEFAULT_ENTITY_TYPES)
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -495,6 +494,7 @@ async def extract_entities(
             cache_type="extract",
             chunk_id=chunk_key,
             cache_keys_collector=cache_keys_collector,
+            enable_cache=global_config.get("enable_llm_cache_for_entity_extract", True),
         )
 
         history = pack_user_ass_to_openai_messages(
@@ -522,6 +522,7 @@ async def extract_entities(
                 cache_type="extract",
                 chunk_id=chunk_key,
                 cache_keys_collector=cache_keys_collector,
+                enable_cache=global_config.get("enable_llm_cache_for_entity_extract", True),
             )
 
             # Process gleaning result separately with file path
@@ -587,8 +588,10 @@ async def extract_entities(
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
-    # Get max async tasks limit from global_config
-    chunk_max_async = global_config.get("llm_model_max_async", 4)
+    # Get max async tasks limit from easy_knowledge_retriever.llm_func
+    llm_service = global_config.get("llm_service")
+    chunk_max_async = getattr(llm_service, "max_async", DEFAULT_MAX_ASYNC)
+
     semaphore = asyncio.Semaphore(chunk_max_async)
 
     async def _process_with_semaphore(chunk):
