@@ -185,11 +185,11 @@ def chunking_by_token_size(
                 "chunk_order_index": index,
             }
             
+            page_start = None
             if pages and token_to_page_map:
                 # Find page for 'start' token index
                 # Since token counts might mismatch slightly, we scan.
                 # But we can just iterate.
-                page_start = None
                 for p_start, p_end, p_num in token_to_page_map:
                     if p_start <= start: # We want the page containing the start token
                          # Update candidate, but keep checking (start could be in later pages? No, sorted)
