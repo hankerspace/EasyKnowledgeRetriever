@@ -12,8 +12,9 @@
 
 Full documentation (GitHub Pages): https://hankerspace.github.io/EasyKnowledgeRetriever/
 
-## Features~~~~
+## Features
 
+- **Multimodal Ingestion**: Parse & ingest PDF data containing images, tables, equations, ... Based on MinerU lib (https://github.com/opendatalab/MinerU).
 - **Hybrid Retrieval**: Combines vector similarity search with knowledge graph exploration for more context-aware answers.
 - **Knowledge Graph Integration**: Automatically extracts entities and relationships from your text documents.
 - **Modular Storage**: Supports various backends for Key-Value pairs, Vector Stores, and Graph Storage (e.g., JSON, NanoVectorDB, NetworkX, Neo4j, Milvus).
@@ -154,6 +155,49 @@ async def query_knowledge_base():
 if __name__ == "__main__":
     asyncio.run(query_knowledge_base())
 ```
+
+## PDF Ingestion with Mineru (Images & Complex Layouts)
+
+Easy Knowledge Retriever integrates **Mineru** (based on magic-pdf) to handle complex PDF documents, preserving layouts and extracting images.
+
+### Ingestion Pipeline Details
+
+The ingestion process orchestrates several advanced steps to transform raw documents into a rich knowledge base:
+
+![Ingestion Flow](docs/ingest.png)
+
+1.  **Parsing with Mineru**: The system uses **Mineru** (based on *Magic-PDF*) to extract text, tables, and images with high structural fidelity.
+2.  **Multimodal Enrichment**: Extracted images are processed by a Vision Language Model (VLM, e.g., GPT-4o). The VLM generates descriptive summaries which are injected directly into the text context, making visual data searchable.
+3.  **Page-Aware Chunking**: The text is split into chunks using a sliding window approach that preserves the mapping to original page numbers for precise citations.
+4.  **Knowledge Graph Extraction**: An LLM extracts entities and relationships from the chunks. It performs iterative gleaning to ensure no details are missed, building a structured graph of knowledge alongside vector embeddings.
+
+### Prerequisites
+Ensure that the `mineru` dependencies are installed (included in `requirements.txt`) and that you are using a Vision-capable LLM model.
+
+### Example
+The usage remains simple:
+
+```python
+# ... Initialize RAG as shown in Quick Start ...
+
+# Ingest a complex PDF with images
+await rag.ingest("./documents/complex_report_with_charts.pdf")
+
+# The system automatically handles image extraction and summarization.
+```
+
+## Retrieval Workflow
+
+The retrieval process employs a hybrid strategy that orchestrates parallel searches to capture both semantic meaning and explicit knowledge connections.
+
+![Retrieval Workflow](docs/retrieve.png)
+
+1.  **Keyword Extraction**: An LLM extracts both high-level concepts (for thematic search) and low-level entities (for specific details) from the user query.
+2.  **Parallel Search**:
+    *   **Local Search**: Navigates the Knowledge Graph using low-level entities to find direct neighbors and details.
+    *   **Global Search**: Explores broader relationships in the Knowledge Graph using high-level concepts.
+    *   **Vector Search**: Finds semantically similar text chunks from the vector database using the query embedding.
+3.  **Fusion & Context Building**: Results from all sources are merged, deduplicated, and mapped back to their original source text chunks. This comprehensive context is then provided to the LLM to generate an accurate, grounded response.
 
 ## Advanced Configuration
 
