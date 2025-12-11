@@ -7,7 +7,7 @@ import inspect
 import os
 import time
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from functools import partial
 from typing import (
@@ -24,7 +24,7 @@ from typing import (
     Dict,
     Union,
 )
-from easy_knowledge_retriever.utils.logger import logger, set_verbose_debug
+from easy_knowledge_retriever.utils.logger import logger
 from easy_knowledge_retriever.utils.hashing import compute_mdhash_id, generate_track_id
 from easy_knowledge_retriever.utils.file_utils import load_json, write_json
 from easy_knowledge_retriever.llm.utils import EmbeddingFunc
@@ -59,7 +59,7 @@ from easy_knowledge_retriever.kg.registry import (
 from easy_knowledge_retriever.retrieval.base import BaseRetrieval
 from easy_knowledge_retriever.retrieval.retrieval_factory import RetrievalFactory
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
-from easy_knowledge_retriever.reranker.openai import OpenAIRerankerService
+
 
 
 
@@ -80,6 +80,10 @@ from easy_knowledge_retriever.kg.base import (
     DeletionResult,
     QueryResult,
     QueryContextResult,
+    Entity,
+    Relationship,
+    Chunk,
+    Reference,
 )
 from easy_knowledge_retriever.kg.kv_storage.base import (
     BaseKVStorage,
@@ -118,7 +122,6 @@ from easy_knowledge_retriever.utils.async_utils import (
 )
 from easy_knowledge_retriever.utils.common_utils import (
     lazy_external_import,
-    check_storage_env_vars,
     convert_to_user_format,
 )
 from easy_knowledge_retriever.utils.vector_utils import (
@@ -2008,7 +2011,13 @@ class EasyKnowledgeRetriever:
                                     knowledge_graph_inst=self.chunk_entity_relation_graph,
                                     entity_vdb=self.entities_vdb,
                                     relationships_vdb=self.relationships_vdb,
-                                    global_config=asdict(self),
+                                    llm_service=self.llm_service,
+                                    source_ids_limit_method=self.source_ids_limit_method,
+                                    max_source_ids_per_entity=self.max_source_ids_per_entity,
+                                    max_source_ids_per_relation=self.max_source_ids_per_relation,
+                                    max_file_paths=self.max_file_paths,
+                                    file_path_more_placeholder=self.file_path_more_placeholder,
+                                    workspace=self.workspace,
                                     full_entities_storage=self.full_entities,
                                     full_relations_storage=self.full_relations,
                                     doc_id=doc_id,
@@ -2191,7 +2200,12 @@ class EasyKnowledgeRetriever:
         try:
             chunk_results = await extract_entities(
                 chunk,
-                global_config=asdict(self),
+                llm_model_func=self.llm_model_func,
+                entity_extract_max_gleaning=self.entity_extract_max_gleaning,
+                llm_service=self.llm_service,
+                language=self.language,
+                entity_types=self.entity_types,
+                enable_llm_cache_for_entity_extract=self.enable_llm_cache_for_entity_extract,
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,
@@ -2437,7 +2451,7 @@ class EasyKnowledgeRetriever:
         param: QueryParam = QueryParam(),
         retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
-    ) -> str | Iterator[str]:
+    ) -> QueryResult:
         """
         Perform a sync query.
 
@@ -2448,7 +2462,7 @@ class EasyKnowledgeRetriever:
             prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior. Defaults to None, which uses PROMPTS["rag_response"].
 
         Returns:
-            str: The result of the query execution.
+            QueryResult: The result of the query execution.
         """
         loop = always_get_an_event_loop()
 
@@ -2460,12 +2474,11 @@ class EasyKnowledgeRetriever:
         param: QueryParam = QueryParam(),
         retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
-    ) -> str | AsyncIterator[str]:
+    ) -> QueryResult:
         """
-        Perform a async query (backward compatibility wrapper).
+        Perform a async query.
 
-        This function is now a wrapper around aquery_llm that maintains backward compatibility
-        by returning only the LLM response content in the original format.
+        This function is a wrapper around aquery_llm returning the full structured QueryResult.
 
         Args:
             query (str): The query to be executed.
@@ -2475,20 +2488,10 @@ class EasyKnowledgeRetriever:
             system_prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior. Defaults to None, which uses PROMPTS["rag_response"].
 
         Returns:
-            str | AsyncIterator[str]: The LLM response content.
-                - Non-streaming: Returns str
-                - Streaming: Returns AsyncIterator[str]
+            QueryResult: The structured query result.
         """
         # Call the new aquery_llm function to get complete results
-        result = await self.aquery_llm(query, param, retrieval, system_prompt)
-
-        # Extract and return only the LLM response for backward compatibility
-        llm_response = result.get("llm_response", {})
-
-        if llm_response.get("is_streaming"):
-            return llm_response.get("response_iterator")
-        else:
-            return llm_response.get("content", "")
+        return await self.aquery_llm(query, param, retrieval, system_prompt)
 
     def query_data(
         self,
@@ -2622,7 +2625,6 @@ class EasyKnowledgeRetriever:
             actual data is nested under the 'data' field, with 'status' and 'message'
             fields at the top level.
         """
-        global_config = asdict(self)
 
         # Create a copy of param to avoid modifying the original
         data_param = QueryParam(
@@ -2751,13 +2753,33 @@ class EasyKnowledgeRetriever:
         if param.max_total_tokens is None:
             param.max_total_tokens = self.max_total_tokens
 
+    def _parse_raw_data_to_lists(self, raw_data: dict) -> dict:
+        """Helper to parse raw_data dict into structured lists."""
+        data = raw_data.get("data", {})
+
+        def to_objs(cls, items):
+            field_names = {f.name for f in fields(cls)}
+            objs = []
+            for item in items:
+                # Filter keys that are valid for the dataclass
+                filtered = {k: v for k, v in item.items() if k in field_names}
+                objs.append(cls(**filtered))
+            return objs
+
+        return {
+            "entities": to_objs(Entity, data.get("entities", [])),
+            "relationships": to_objs(Relationship, data.get("relationships", [])),
+            "chunks": to_objs(Chunk, data.get("chunks", [])),
+            "references": to_objs(Reference, data.get("references", []))
+        }
+
     async def aquery_llm(
         self,
         query: str,
         param: QueryParam = QueryParam(),
         retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> QueryResult:
         """
         Asynchronous complete query API: returns structured retrieval results with LLM generation.
 
@@ -2771,14 +2793,13 @@ class EasyKnowledgeRetriever:
             system_prompt: Optional custom system prompt for LLM generation.
 
         Returns:
-            dict[str, Any]: Complete response with structured data and LLM response.
+            QueryResult: Complete response with structured data and LLM response.
         """
         logger.debug(f"[aquery_llm] Query param: {param}")
 
         # Fill default parameters from configuration if they are None
         self._fill_param_defaults(param)
 
-        global_config = asdict(self)
 
         try:
             if retrieval is None:
@@ -2790,7 +2811,7 @@ class EasyKnowledgeRetriever:
 
             if is_bypass:
                 # Bypass mode: directly use LLM without knowledge retrieval
-                use_llm_func = param.model_func or global_config["llm_model_func"]
+                use_llm_func = param.model_func or self.llm_model_func
                 # Apply higher priority (8) to entity/relation summary tasks
                 use_llm_func = partial(use_llm_func, _priority=8)
 
@@ -2805,48 +2826,45 @@ class EasyKnowledgeRetriever:
                 
                 is_streaming = not isinstance(response, str)
                 
-                return {
-                    "status": "success",
-                    "message": f"Bypass mode LLM {'streaming' if is_streaming else 'non streaming'} response",
-                    "data": {},
-                    "metadata": {},
-                    "llm_response": {
-                        "content": response if not is_streaming else None,
-                        "response_iterator": response if is_streaming else None,
-                        "is_streaming": is_streaming,
-                    },
-                }
+                return QueryResult(
+                    status="success",
+                    message=f"Bypass mode LLM {'streaming' if is_streaming else 'non streaming'} response",
+                    content=response if not is_streaming else None,
+                    response_iterator=response if is_streaming else None,
+                    is_streaming=is_streaming,
+                    metadata={},
+                    raw_data={}
+                )
 
             # Standard RAG mode
             query_context_result = await self.retrieve(query, retrieval)
             
             # Check if query_context_result is effectively empty/None (context string empty)
             if not query_context_result.context and not query_context_result.raw_data:
-                 return {
-                    "status": "failure",
-                    "message": "Query returned no results",
-                    "data": {},
-                    "metadata": {
+                 return QueryResult(
+                    status="failure",
+                    message="Query returned no results",
+                    content=PROMPTS["fail_response"],
+                    metadata={
                         "failure_reason": "no_results",
                         "mode": retrieval.mode,
-                    },
-                    "llm_response": {
-                        "content": PROMPTS["fail_response"],
-                        "response_iterator": None,
-                        "is_streaming": False,
-                    },
-                }
+                    }
+                 )
+
+            parsed_data = self._parse_raw_data_to_lists(query_context_result.raw_data or {})
 
             # Return different content based on query parameters
             if param.only_need_context and not param.only_need_prompt:
-                raw_data = query_context_result.raw_data or {}
-                # Mimic QueryResult structure
-                raw_data["llm_response"] = {
-                    "content": query_context_result.context,
-                    "response_iterator": None,
-                    "is_streaming": False,
-                }
-                return raw_data
+                # Return context as content
+                return QueryResult(
+                    status="success",
+                    message="Context retrieval successful",
+                    content=query_context_result.context,
+                    context=query_context_result.context,
+                    raw_data=query_context_result.raw_data,
+                    metadata=query_context_result.raw_data.get("metadata", {}),
+                    **parsed_data
+                )
 
             user_prompt = f"\n\n{param.user_prompt}" if param.user_prompt else "n/a"
             response_type = (
@@ -2864,19 +2882,20 @@ class EasyKnowledgeRetriever:
             )
             
             if param.only_need_prompt:
-                 raw_data = query_context_result.raw_data or {}
-                 raw_data["llm_response"] = {
-                     "content": sys_prompt,
-                     "response_iterator": None,
-                     "is_streaming": False
-                 }
-                 return raw_data
+                 return QueryResult(
+                     status="success",
+                     message="Prompt generation successful",
+                     content=sys_prompt,
+                     raw_data=query_context_result.raw_data,
+                     metadata=query_context_result.raw_data.get("metadata", {}),
+                     **parsed_data
+                 )
 
             # Generate
             if param.model_func:
                 use_model_func = param.model_func
             else:
-                use_model_func = global_config["llm_model_func"]
+                use_model_func = self.llm_model_func
                 use_model_func = partial(use_model_func, _priority=5)
 
             param.stream = True if param.stream is None else param.stream
@@ -2889,40 +2908,34 @@ class EasyKnowledgeRetriever:
 
             is_streaming = not isinstance(response, str)
             
-            # Build raw data response
-            result_data = {
-                "status": "success",
-                "message": "Query success",
-                "data": query_context_result.raw_data or {},
-                "metadata": {
+            result = QueryResult(
+                status="success",
+                message="Query success",
+                content=response if not is_streaming else None,
+                response_iterator=response if is_streaming else None,
+                is_streaming=is_streaming,
+                context=query_context_result.context,
+                raw_data=query_context_result.raw_data,
+                metadata={
                     "mode": retrieval.mode,
                     "param": asdict(param),
+                    **(query_context_result.raw_data.get("metadata", {}) or {})
                 },
-                "llm_response": {
-                    "content": response if not is_streaming else None,
-                    "response_iterator": response if is_streaming else None,
-                    "is_streaming": is_streaming,
-                }
-            }
+                **parsed_data
+            )
             
             await self._query_done()
-            return result_data
+            return result
 
         except Exception as e:
             logger.error(f"Query failed: {e}")
             logger.error(traceback.format_exc())
             # Return error response
-            return {
-                "status": "failure",
-                "message": f"Query failed: {str(e)}",
-                "data": {},
-                "metadata": {},
-                "llm_response": {
-                    "content": None,
-                    "response_iterator": None,
-                    "is_streaming": False,
-                },
-            }
+            return QueryResult(
+                status="failure",
+                message=f"Query failed: {str(e)}",
+                content=None
+            )
 
     def query_llm(
         self,
@@ -2930,7 +2943,7 @@ class EasyKnowledgeRetriever:
         param: QueryParam = QueryParam(),
         retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> QueryResult:
         """
         Synchronous complete query API: returns structured retrieval results with LLM generation.
 
@@ -2944,7 +2957,7 @@ class EasyKnowledgeRetriever:
             system_prompt: Optional custom system prompt for LLM generation.
 
         Returns:
-            dict[str, Any]: Same complete response format as aquery_llm.
+            QueryResult: Same complete response format as aquery_llm.
         """
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.aquery_llm(query, param, retrieval, system_prompt))
@@ -3668,7 +3681,17 @@ class EasyKnowledgeRetriever:
                         relationships_vdb=self.relationships_vdb,
                         text_chunks_storage=self.text_chunks,
                         llm_response_cache=self.llm_response_cache,
-                        global_config=asdict(self),
+                        tokenizer=self.tokenizer,
+                        llm_service=self.llm_service,
+                        embedding_service=self.embedding_service,
+                        workspace=self.workspace,
+                        max_source_ids_per_entity=self.max_source_ids_per_entity,
+                        max_source_ids_per_relation=self.max_source_ids_per_relation,
+                        max_file_paths=self.max_file_paths,
+                        source_ids_limit_method=self.source_ids_limit_method,
+                        force_llm_summary_on_merge=getattr(self.llm_service, "force_llm_summary_on_merge", 5),
+                        file_path_more_placeholder=self.file_path_more_placeholder,
+                        language=self.language,
                         pipeline_status=pipeline_status,
                         pipeline_status_lock=pipeline_status_lock,
                         entity_chunks_storage=self.entity_chunks,

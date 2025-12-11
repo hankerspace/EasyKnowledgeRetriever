@@ -177,21 +177,78 @@ class DeletionResult:
 
 
 @dataclass
+class Entity:
+    """Represents an entity in the knowledge graph."""
+    entity_name: str
+    entity_type: str
+    description: str
+    source_id: str
+    file_path: str = ""
+    created_at: str = ""
+    reference_id: str = ""
+
+@dataclass
+class Relationship:
+    """Represents a relationship between entities."""
+    src_id: str
+    tgt_id: str
+    description: str
+    keywords: str
+    weight: float
+    source_id: str
+    file_path: str = ""
+    created_at: str = ""
+    reference_id: str = ""
+
+@dataclass
+class Chunk:
+    """Represents a text chunk."""
+    content: str
+    file_path: str
+    chunk_id: str
+    reference_id: str = ""
+
+@dataclass
+class Reference:
+    """Represents a file reference."""
+    reference_id: str
+    file_path: str
+
+@dataclass
 class QueryResult:
     """
     Unified query result data structure for all query modes.
 
     Attributes:
-        content: Text content for non-streaming responses
+        content: Text content for non-streaming responses (LLM response)
         response_iterator: Streaming response iterator for streaming responses
-        raw_data: Complete structured data including references and metadata
+        raw_data: Complete structured data including references and metadata (legacy dict)
         is_streaming: Whether this is a streaming result
+        context: The context text used for the query
+        entities: List of entities used
+        relationships: List of relationships used
+        chunks: List of text chunks used
+        references: List of references
+        metadata: Query metadata
+        status: Operation status
+        message: Operation message
     """
 
     content: Optional[str] = None
     response_iterator: Optional[AsyncIterator[str]] = None
     raw_data: Optional[Dict[str, Any]] = None
     is_streaming: bool = False
+    
+    # New structured fields
+    context: Optional[str] = None
+    entities: List[Entity] = field(default_factory=list)
+    relationships: List[Relationship] = field(default_factory=list)
+    chunks: List[Chunk] = field(default_factory=list)
+    references: List[Reference] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    status: Literal["success", "failure"] = "success"
+    message: str = ""
 
     @property
     def reference_list(self) -> List[Dict[str, str]]:
@@ -202,21 +259,16 @@ class QueryResult:
             List[Dict[str, str]]: Reference list in format:
             [{"reference_id": "1", "file_path": "/path/to/file.pdf"}, ...]
         """
+        if self.references:
+            return [{"reference_id": r.reference_id, "file_path": r.file_path} for r in self.references]
         if self.raw_data:
             return self.raw_data.get("data", {}).get("references", [])
         return []
 
     @property
-    def metadata(self) -> Dict[str, Any]:
-        """
-        Convenient property to extract metadata from raw_data.
-
-        Returns:
-            Dict[str, Any]: Query metadata including query_mode, keywords, etc.
-        """
-        if self.raw_data:
-            return self.raw_data.get("metadata", {})
-        return {}
+    def files(self) -> List[str]:
+        """Returns list of unique file paths."""
+        return list(set(r.file_path for r in self.references))
 
 
 @dataclass

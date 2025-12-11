@@ -414,7 +414,12 @@ async def _get_cached_extraction_results(
 
 async def extract_entities(
     chunks: dict[str, TextChunkSchema],
-    global_config: dict[str, str],
+    llm_model_func: callable,
+    entity_extract_max_gleaning: int,
+    llm_service: any = None,
+    language: str = "English",
+    entity_types: list[str] = None,
+    enable_llm_cache_for_entity_extract: bool = True,
     pipeline_status: dict = None,
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
@@ -428,13 +433,11 @@ async def extract_entities(
                     "User cancelled during entity extraction"
                 )
 
-    use_llm_func: callable = global_config["llm_model_func"]
-    entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
+    use_llm_func: callable = llm_model_func
+    if entity_types is None:
+        entity_types = DEFAULT_ENTITY_TYPES
 
     ordered_chunks = list(chunks.items())
-    # add language and example number params to prompt
-    language = global_config.get("language", "English")
-    entity_types = global_config.get("entity_types", DEFAULT_ENTITY_TYPES)
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
@@ -495,7 +498,7 @@ async def extract_entities(
             cache_type="extract",
             chunk_id=chunk_key,
             cache_keys_collector=cache_keys_collector,
-            enable_cache=global_config.get("enable_llm_cache_for_entity_extract", True),
+            enable_cache=enable_llm_cache_for_entity_extract,
         )
 
         history = pack_user_ass_to_openai_messages(
@@ -523,7 +526,7 @@ async def extract_entities(
                 cache_type="extract",
                 chunk_id=chunk_key,
                 cache_keys_collector=cache_keys_collector,
-                enable_cache=global_config.get("enable_llm_cache_for_entity_extract", True),
+                enable_cache=enable_llm_cache_for_entity_extract,
             )
 
             # Process gleaning result separately with file path
@@ -589,8 +592,7 @@ async def extract_entities(
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
-    # Get max async tasks limit from easy_knowledge_retriever.llm_func
-    llm_service = global_config.get("llm_service")
+    # Get max async tasks limit from llm_service
     chunk_max_async = getattr(llm_service, "max_async", DEFAULT_MAX_ASYNC)
 
     semaphore = asyncio.Semaphore(chunk_max_async)

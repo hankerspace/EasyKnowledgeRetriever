@@ -49,7 +49,6 @@ from easy_knowledge_retriever.llm.prompts import PROMPTS
 from easy_knowledge_retriever.constants import (
     GRAPH_FIELD_SEP,
     DEFAULT_RELATED_CHUNK_NUMBER,
-    DEFAULT_KG_CHUNK_PICK_METHOD,
     DEFAULT_MAX_TOTAL_TOKENS,
 )
 
@@ -73,7 +72,10 @@ async def get_keywords_from_query(
     Args:
         query: The user's query text
         query_param: Query parameters that may contain pre-defined keywords
-        global_config: Global configuration dictionary
+        tokenizer: Tokenizer instance
+        llm_model_func: LLM model function
+        enable_llm_cache: Whether to enable LLM caching
+        language: Language for keyword extraction
         hashing_kv: Optional key-value storage for caching results
 
     Returns:
@@ -252,7 +254,6 @@ async def _find_related_text_unit_from_entities(
         logger.warning("No entities with text chunks found")
         return []
 
-    # Removed global_config lookup
 
     # Step 2: Count chunk occurrences and deduplicate (keep chunks from earlier positioned entities)
     chunk_occurrence_count = {}
@@ -328,7 +329,7 @@ async def _find_related_text_unit_from_entities(
         # Pick by entity and chunk weight:
         #     When reranking is disabled, delivered more solely KG related chunks to the LLM
         selected_chunk_ids = pick_by_weighted_polling(
-            entities_with_chunks, max_related_chunks, min_related_chunks=1
+            entities_with_chunks, max_related_chunks
         )
 
         logger.info(
@@ -418,7 +419,6 @@ async def _find_related_text_unit_from_relations(
         logger.warning("No relation-related chunks found")
         return []
 
-    # Removed global_config lookup
 
     # Step 2: Count chunk occurrences and deduplicate (keep chunks from earlier positioned relationships)
     # Also remove duplicates with entity_chunks
@@ -526,7 +526,7 @@ async def _find_related_text_unit_from_relations(
     if kg_chunk_pick_method == "WEIGHT":
         # Apply linear gradient weighted polling algorithm
         selected_chunk_ids = pick_by_weighted_polling(
-            relations_with_chunks, max_related_chunks, min_related_chunks=1
+            relations_with_chunks, max_related_chunks
         )
 
         logger.info(
@@ -926,7 +926,6 @@ async def _build_context_str(
         query=query,
         unique_chunks=merged_chunks,
         query_param=query_param,
-        source_type=query_param.mode,
         chunk_token_limit=available_chunk_tokens,  # Pass dynamic limit
     )
 
@@ -1244,7 +1243,6 @@ async def kg_query(
         relationships_vdb: Relationship vector database
         text_chunks_db: Text chunks storage
         query_param: Query parameters
-        global_config: Global configuration
         hashing_kv: Cache storage
         system_prompt: System prompt
         chunks_vdb: Document chunks vector database
@@ -1477,7 +1475,6 @@ async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
-    global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     retrieval: "BaseRetrieval" = None,
@@ -1489,9 +1486,9 @@ async def naive_query(
         query: Query string
         chunks_vdb: Document chunks vector database
         query_param: Query parameters
-        global_config: Global configuration
         hashing_kv: Cache storage
         system_prompt: System prompt
+        retrieval: Retrieval strategy instance
 
     Returns:
         QueryResult | None: Unified query result object containing:

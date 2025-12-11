@@ -151,15 +151,8 @@ async def _summarize_descriptions(
     """Helper function to summarize a list of descriptions using LLM."""
     use_llm_func = getattr(llm_service, "llm_model_func", None)
     if not use_llm_func:
-         # Fallback or error? Assuming llm_service has it or we can't proceed.
-         # But wait, original used global_config["llm_model_func"].
-         # Ideally we pass llm_model_func directly?
-         # Or assume llm_service has it. BaseLLMService usually implies it?
-         # Actually llm_service object in retriever has model_func?
-         # Let's assume we can get it from service or pass it explicitly?
-         # I will use getattr(llm_service, "llm_model_func") for now.
-         # If llm_service is None, this crashes.
-         raise ValueError("llm_service must be provided")
+         # llm_service must be provided with llm_model_func attribute
+         raise ValueError("llm_service must be provided with llm_model_func attribute")
 
     # Apply higher priority (8) to entity/relation summary tasks
     use_llm_func = partial(use_llm_func, _priority=8)

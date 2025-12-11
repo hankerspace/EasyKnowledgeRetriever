@@ -37,7 +37,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
         # Note: These values should now be passed via constructor/init
         # We rely on self.cosine_better_than_threshold and self.embedding_dim being set by init
         
-        # working_dir is still needed from global_config as it defines the root environment
+        # working_dir is used to define the storage root path
         working_dir = self.working_dir
 
         # Check for NANO_VECTOR_DB_WORKSPACE environment variable first (higher priority)

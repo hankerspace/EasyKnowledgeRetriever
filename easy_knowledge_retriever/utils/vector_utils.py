@@ -77,14 +77,12 @@ def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
 def pick_by_weighted_polling(
     entity_info: list[dict],
     max_related_chunks: int,
-    min_related_chunks: int = 1,
 ) -> list[str]:
     """Pick chunks by weighted polling from entity info.
     
     Args:
         entity_info: List of dictionaries containing entity and chunk info
         max_related_chunks: Maximum number of chunks to select
-        min_related_chunks: Minimum number of chunks to select
         
     Returns:
         list[str]: Selected chunk IDs
@@ -704,7 +702,6 @@ async def process_retrieved_chunks(
     unique_chunks: list[dict],
     query_param: Any,
     chunk_token_limit: int,
-    source_type: str = "vector",
     reranker_service: Optional[BaseRerankerService] = None,
 ) -> list[dict]:
     """Process and filter chunks for retrieval context.
@@ -713,9 +710,7 @@ async def process_retrieved_chunks(
         query: Query string
         unique_chunks: List of chunk dictionaries
         query_param: QueryParam object
-        global_config: Global configuration dict
         chunk_token_limit: Maximum tokens allowed for chunks
-        source_type: Type of source ("vector" or "text")
         reranker_service: Optional reranker service to use
         
     Returns:

@@ -56,8 +56,8 @@ async def main():
     await rag.initialize_storages()
     try:
         await rag.ingest("./documents/example.pdf")
-        answer = await rag.aquery("What does the document say about forest fires?", param=QueryParam(mode="mix"))
-        print(answer)
+        result = await rag.aquery("What does the document say about forest fires?", param=QueryParam(mode="mix"))
+        print(result.content)
     finally:
         await rag.finalize_storages()
 

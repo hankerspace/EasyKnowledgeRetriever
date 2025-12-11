@@ -1,11 +1,12 @@
 from __future__ import annotations
 import asyncio
 import time
+import os
 from collections import defaultdict, Counter
 from typing import Any
 
 from easy_knowledge_retriever.utils.logger import logger
-from easy_knowledge_retriever.utils.tokenizer import Tokenizer
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer, TiktokenTokenizer
 from easy_knowledge_retriever.utils.hashing import compute_mdhash_id
 from easy_knowledge_retriever.utils.vector_utils import (
     safe_vdb_operation_with_exception,
@@ -27,6 +28,7 @@ from easy_knowledge_retriever.constants import (
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_FILE_PATH_MORE_PLACEHOLDER,
     DEFAULT_MAX_ASYNC,
+    DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
 )
 from easy_knowledge_retriever.operations.summarization import _handle_entity_relation_summary
 from easy_knowledge_retriever.operations.extraction import (
@@ -836,7 +838,13 @@ async def _merge_nodes_then_upsert(
     nodes_data: list[dict],
     knowledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage | None,
-    global_config: dict,
+    source_ids_limit_method: str,
+    max_source_ids_per_entity: int,
+    llm_service: Any,
+    max_file_paths: int,
+    file_path_more_placeholder: str,
+    tokenizer: Tokenizer,
+    force_llm_summary_on_merge: int,
     pipeline_status: dict = None,
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
@@ -885,8 +893,8 @@ async def _merge_nodes_then_upsert(
         )
 
     # 3. Finalize source_id by applying source ids limit
-    limit_method = global_config.get("source_ids_limit_method")
-    max_source_limit = global_config.get("max_source_ids_per_entity")
+    limit_method = source_ids_limit_method
+    max_source_limit = max_source_ids_per_entity
     source_ids = apply_source_ids_limit(
         full_source_ids,
         max_source_limit,
@@ -972,23 +980,20 @@ async def _merge_nodes_then_upsert(
 
     # 8. Get summary description an LLM usage status
     description, llm_was_used = await _handle_entity_relation_summary(
-        "Entity",
-        entity_name,
-        description_list,
-        GRAPH_FIELD_SEP,
-        global_config,
-        llm_response_cache,
+        description_type="Entity",
+        entity_or_relation_name=entity_name,
+        description_list=description_list,
+        seperator=GRAPH_FIELD_SEP,
+        tokenizer=tokenizer,
+        force_llm_summary_on_merge=force_llm_summary_on_merge,
+        llm_service=llm_service,
+        llm_response_cache=llm_response_cache,
     )
 
     # 9. Build file_path within MAX_FILE_PATHS
     file_paths_list = []
     seen_paths = set()
     has_placeholder = False  # Indicating file_path has been truncated before
-
-    max_file_paths = global_config.get("max_file_paths", DEFAULT_MAX_FILE_PATHS)
-    file_path_placeholder = global_config.get(
-        "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-    )
 
     # Collect from already_file_paths, excluding placeholder
     for fp in already_file_paths:
@@ -1008,12 +1013,6 @@ async def _merge_nodes_then_upsert(
 
     # Apply count limit
     if len(file_paths_list) > max_file_paths:
-        limit_method = global_config.get(
-            "source_ids_limit_method", SOURCE_IDS_LIMIT_METHOD_KEEP
-        )
-        file_path_placeholder = global_config.get(
-            "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-        )
         # Add + sign to indicate actual file count is higher
         original_count_str = (
             f"{len(file_paths_list)}+" if has_placeholder else str(len(file_paths_list))
@@ -1116,7 +1115,13 @@ async def _merge_edges_then_upsert(
     knowledge_graph_inst: BaseGraphStorage,
     relationships_vdb: BaseVectorStorage | None,
     entity_vdb: BaseVectorStorage | None,
-    global_config: dict,
+    source_ids_limit_method: str,
+    max_source_ids_per_relation: int,
+    llm_service: Any,
+    max_file_paths: int,
+    file_path_more_placeholder: str,
+    tokenizer: Tokenizer,
+    force_llm_summary_on_merge: int,
     pipeline_status: dict = None,
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
@@ -1198,8 +1203,8 @@ async def _merge_edges_then_upsert(
         )
 
     # 3. Finalize source_id by applying source ids limit
-    limit_method = global_config.get("source_ids_limit_method")
-    max_source_limit = global_config.get("max_source_ids_per_relation")
+    limit_method = source_ids_limit_method
+    max_source_limit = max_source_ids_per_relation
     source_ids = apply_source_ids_limit(
         full_source_ids,
         max_source_limit,
@@ -1207,7 +1212,7 @@ async def _merge_edges_then_upsert(
         identifier=f"`{src_id}`~`{tgt_id}`",
     )
     limit_method = (
-        global_config.get("source_ids_limit_method") or SOURCE_IDS_LIMIT_METHOD_KEEP
+        source_ids_limit_method or SOURCE_IDS_LIMIT_METHOD_KEEP
     )
 
     # 4. Only keep edges with source_id in the final source_ids list if in KEEP mode
@@ -1305,19 +1310,16 @@ async def _merge_edges_then_upsert(
         f"({src_id}, {tgt_id})",
         description_list,
         GRAPH_FIELD_SEP,
-        global_config,
-        llm_response_cache,
+        tokenizer=tokenizer,
+        force_llm_summary_on_merge=force_llm_summary_on_merge,
+        llm_service=llm_service,
+        llm_response_cache=llm_response_cache,
     )
 
     # 9. Build file_path within MAX_FILE_PATHS limit
     file_paths_list = []
     seen_paths = set()
     has_placeholder = False  # Track if already_file_paths contains placeholder
-
-    max_file_paths = global_config.get("max_file_paths", DEFAULT_MAX_FILE_PATHS)
-    file_path_placeholder = global_config.get(
-        "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-    )
 
     # Collect from already_file_paths, excluding placeholder
     for fp in already_file_paths:
@@ -1337,16 +1339,7 @@ async def _merge_edges_then_upsert(
             seen_paths.add(file_path_item)
 
     # Apply count limit
-    max_file_paths = global_config.get("max_file_paths")
-
     if len(file_paths_list) > max_file_paths:
-        limit_method = global_config.get(
-            "source_ids_limit_method", SOURCE_IDS_LIMIT_METHOD_KEEP
-        )
-        file_path_placeholder = global_config.get(
-            "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-        )
-
         # Add + sign to indicate actual file count is higher
         original_count_str = (
             f"{len(file_paths_list)}+" if has_placeholder else str(len(file_paths_list))
@@ -1514,10 +1507,8 @@ async def _merge_edges_then_upsert(
                 )
 
             # 4. Apply source_ids limit for graph and vector db
-            limit_method = global_config.get(
-                "source_ids_limit_method", SOURCE_IDS_LIMIT_METHOD_KEEP
-            )
-            max_source_limit = global_config.get("max_source_ids_per_entity")
+            limit_method = source_ids_limit_method or SOURCE_IDS_LIMIT_METHOD_KEEP
+            max_source_limit = max_source_ids_per_relation
             limited_source_ids = apply_source_ids_limit(
                 merged_full_source_ids,
                 max_source_limit,
@@ -1641,7 +1632,13 @@ async def merge_nodes_and_edges(
     knowledge_graph_inst: BaseGraphStorage,
     entity_vdb: BaseVectorStorage,
     relationships_vdb: BaseVectorStorage,
-    global_config: dict[str, str],
+    llm_service: Any,
+    source_ids_limit_method: str,
+    max_source_ids_per_entity: int,
+    max_source_ids_per_relation: int,
+    max_file_paths: int,
+    file_path_more_placeholder: str,
+    workspace: str = "",
     full_entities_storage: BaseKVStorage = None,
     full_relations_storage: BaseKVStorage = None,
     doc_id: str = None,
@@ -1691,8 +1688,12 @@ async def merge_nodes_and_edges(
         pipeline_status["latest_message"] = log_message
         pipeline_status["history_messages"].append(log_message)
 
-    # Get max async tasks limit from global_config for semaphore control
-    llm_service = global_config.get("llm_service")
+    # Get max async tasks limit from llm_service for semaphore control
+    # Initialize tokenizer for summary operations
+    embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+    tokenizer = TiktokenTokenizer(model_name=embedding_model)
+    force_llm_summary_on_merge = getattr(llm_service, "force_llm_summary_on_merge", DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE)
+
     max_async = getattr(llm_service, "max_async", 4)
     graph_max_async = max_async * 2
     semaphore = asyncio.Semaphore(graph_max_async)
@@ -1714,7 +1715,6 @@ async def merge_nodes_and_edges(
                             "User cancelled during entity merge"
                         )
 
-            workspace = global_config.get("workspace", "")
             namespace = f"{workspace}:GraphDB" if workspace else "GraphDB"
             async with get_storage_keyed_lock(
                 [entity_name], namespace=namespace, enable_logging=False
@@ -1726,7 +1726,13 @@ async def merge_nodes_and_edges(
                         entities,
                         knowledge_graph_inst,
                         entity_vdb,
-                        global_config,
+                        source_ids_limit_method,
+                        max_source_ids_per_entity,
+                        llm_service,
+                        max_file_paths,
+                        file_path_more_placeholder,
+                        tokenizer,
+                        force_llm_summary_on_merge,
                         pipeline_status,
                         pipeline_status_lock,
                         llm_response_cache,
@@ -1813,7 +1819,6 @@ async def merge_nodes_and_edges(
                             "User cancelled during relation merge"
                         )
 
-            workspace = global_config.get("workspace", "")
             namespace = f"{workspace}:GraphDB" if workspace else "GraphDB"
             sorted_edge_key = sorted([edge_key[0], edge_key[1]])
 
@@ -1833,7 +1838,13 @@ async def merge_nodes_and_edges(
                         knowledge_graph_inst,
                         relationships_vdb,
                         entity_vdb,
-                        global_config,
+                        source_ids_limit_method,
+                        max_source_ids_per_relation,
+                        llm_service,
+                        max_file_paths,
+                        file_path_more_placeholder,
+                        tokenizer,
+                        force_llm_summary_on_merge,
                         pipeline_status,
                         pipeline_status_lock,
                         llm_response_cache,

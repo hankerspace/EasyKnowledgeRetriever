@@ -1,6 +1,5 @@
 from easy_knowledge_retriever.kg.state import (
     _manager,
-    _workers,
     _is_multiprocess,
     _lock_registry,
     _lock_registry_count,
@@ -28,13 +27,9 @@ from easy_knowledge_retriever.kg.concurrency import (
     get_internal_lock,
     get_storage_keyed_lock,
     get_data_init_lock,
-    cleanup_keyed_lock,
-    get_keyed_lock_status,
     get_namespace_lock,
-    get_pipeline_status_lock,
     inc_debug_n_locks_acquired,
     dec_debug_n_locks_acquired,
-    get_debug_n_locks_acquired,
 )
 # Re-exported types for compatibility
 from easy_knowledge_retriever.kg.concurrency import T
@@ -42,7 +37,6 @@ from easy_knowledge_retriever.kg.state import LockType
 
 from easy_knowledge_retriever.kg.shared_memory import (
     initialize_share_data,
-    finalize_share_data,
     set_default_workspace,
     get_default_workspace,
     get_namespace_data,
@@ -51,5 +45,4 @@ from easy_knowledge_retriever.kg.shared_memory import (
     get_update_flag,
     set_all_update_flags,
     clear_all_update_flags,
-    get_all_update_flags_status,
 )

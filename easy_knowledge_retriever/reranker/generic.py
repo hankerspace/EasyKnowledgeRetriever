@@ -27,10 +27,8 @@ async def generic_rerank_api(
     base_url: str,
     api_key: Optional[str],
     top_n: Optional[int] = None,
-    return_documents: Optional[bool] = None,
     extra_body: Optional[Dict[str, Any]] = None,
     response_format: str = "standard",
-    request_format: str = "standard",
     enable_chunking: bool = False,
     max_tokens_per_doc: int = 480,
 ) -> List[Dict[str, Any]]:

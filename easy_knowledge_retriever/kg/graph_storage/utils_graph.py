@@ -1564,7 +1564,7 @@ async def amerge_entities(
     all_entities.add(target_entity)
     lock_keys = sorted(all_entities)
 
-    workspace = entities_vdb.global_config.get("workspace", "")
+    workspace = getattr(entities_vdb, "workspace", "")
     namespace = f"{workspace}:GraphDB" if workspace else "GraphDB"
     async with get_storage_keyed_lock(
         lock_keys, namespace=namespace, enable_logging=False

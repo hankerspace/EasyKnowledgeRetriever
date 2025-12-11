@@ -10,6 +10,19 @@ This document lists all services available in Easy Knowledge Retriever (EKR) and
 
 Note: Class and option names here follow the codebase. Examples are in Python.
 
+## Architecture Overview
+
+EKR uses **explicit parameter passing** for all configuration. This means:
+
+- **No global configuration objects**: All parameters are passed explicitly through constructors and function arguments
+- **Dependency injection**: Services (LLM, embedding, storage) are instantiated separately and passed to `EasyKnowledgeRetriever`
+- **Encapsulation**: Each component receives only the parameters it needs, improving testability and maintainability
+
+This design ensures that:
+1. Configuration is transparent and traceable
+2. Components can be tested in isolation
+3. Multiple instances can coexist with different configurations
+
 ## 1. Overview of Services
 
 EKR is composed of the following service layers:

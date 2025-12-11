@@ -84,8 +84,16 @@ async def main():
         # We can still pass param for generation settings if needed, or rely on defaults
         # But aquery uses retrieval for retrieval strategy.
         result = await rag.aquery(query_text, retrieval=retrieval)
-        print("\nResult:")
-        print(result)
+        print("\nResult Content:")
+        print(result.content)
+
+        print("\nRetrieved Entities:")
+        for entity in result.entities:
+            print(f" - {entity.entity_name} ({entity.entity_type})")
+
+        print("\nReferenced Files:")
+        for file in result.files:
+            print(f" - {file}")
         
     finally:
         await rag.finalize_storages()
