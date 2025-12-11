@@ -2,6 +2,42 @@ from __future__ import annotations
 
 from typing import Any, List, Dict, Optional
 from .generic import generic_rerank_api
+from .base import BaseRerankerService
+
+class OpenAIRerankerService(BaseRerankerService):
+    def __init__(
+        self,
+        model: str,
+        base_url: str,
+        api_key: Optional[str],
+        extra_body: Optional[Dict[str, Any]] = None,
+        enable_chunking: bool = False,
+        max_tokens_per_doc: int = 480,
+    ):
+        self.model = model
+        self.base_url = base_url
+        self.api_key = api_key
+        self.extra_body = extra_body
+        self.enable_chunking = enable_chunking
+        self.max_tokens_per_doc = max_tokens_per_doc
+
+    async def rerank(
+        self,
+        query: str,
+        documents: List[str],
+        top_n: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        return await openai_compatible_rerank(
+            query=query,
+            documents=documents,
+            model=self.model,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            top_n=top_n,
+            extra_body=self.extra_body,
+            enable_chunking=self.enable_chunking,
+            max_tokens_per_doc=self.max_tokens_per_doc
+        )
 
 async def openai_compatible_rerank(
     query: str,

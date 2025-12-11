@@ -5,6 +5,7 @@ from collections import defaultdict, Counter
 from typing import Any
 
 from easy_knowledge_retriever.utils.logger import logger
+from easy_knowledge_retriever.utils.tokenizer import Tokenizer
 from easy_knowledge_retriever.utils.hashing import compute_mdhash_id
 from easy_knowledge_retriever.utils.vector_utils import (
     safe_vdb_operation_with_exception,
@@ -14,7 +15,9 @@ from easy_knowledge_retriever.utils.vector_utils import (
 )
 from easy_knowledge_retriever.utils.common_utils import create_prefixed_exception
 from easy_knowledge_retriever.utils.text_utils import split_string_by_multi_markers
-from easy_knowledge_retriever.kg.base import BaseGraphStorage, BaseKVStorage, BaseVectorStorage
+from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
+from easy_knowledge_retriever.kg.kv_storage.base import BaseKVStorage
+from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.kg.concurrency import get_storage_keyed_lock
 from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
 from easy_knowledge_retriever.constants import (
@@ -40,7 +43,17 @@ async def rebuild_knowledge_from_chunks(
     relationships_vdb: BaseVectorStorage,
     text_chunks_storage: BaseKVStorage,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    tokenizer: Tokenizer,
+    llm_service: Any,
+    embedding_service: Any,
+    workspace: str,
+    max_source_ids_per_entity: int,
+    max_source_ids_per_relation: int,
+    max_file_paths: int,
+    source_ids_limit_method: str,
+    force_llm_summary_on_merge: int,
+    file_path_more_placeholder: str,
+    language: str,
     pipeline_status: dict | None = None,
     pipeline_status_lock=None,
     entity_chunks_storage: BaseKVStorage | None = None,
@@ -139,7 +152,6 @@ async def rebuild_knowledge_from_chunks(
                     pipeline_status["history_messages"].append(status_message)
             continue
 
-    llm_service = global_config.get("llm_service")
     max_async = getattr(llm_service, "max_async", 4)
     graph_max_async = max_async * 2
     semaphore = asyncio.Semaphore(graph_max_async)
@@ -152,7 +164,6 @@ async def rebuild_knowledge_from_chunks(
     async def _locked_rebuild_entity(entity_name, chunk_ids):
         nonlocal rebuilt_entities_count, failed_entities_count
         async with semaphore:
-            workspace = global_config.get("workspace", "")
             namespace = f"{workspace}:GraphDB" if workspace else "GraphDB"
             async with get_storage_keyed_lock(
                 [entity_name], namespace=namespace, enable_logging=False
@@ -165,7 +176,15 @@ async def rebuild_knowledge_from_chunks(
                         chunk_ids=chunk_ids,
                         chunk_entities=chunk_entities,
                         llm_response_cache=llm_response_cache,
-                        global_config=global_config,
+                        tokenizer=tokenizer,
+                        llm_service=llm_service,
+                        embedding_service=embedding_service,
+                        max_source_ids_per_entity=max_source_ids_per_entity,
+                        max_file_paths=max_file_paths,
+                        source_ids_limit_method=source_ids_limit_method,
+                        force_llm_summary_on_merge=force_llm_summary_on_merge,
+                        file_path_more_placeholder=file_path_more_placeholder,
+                        language=language,
                         entity_chunks_storage=entity_chunks_storage,
                     )
                     rebuilt_entities_count += 1
@@ -181,7 +200,6 @@ async def rebuild_knowledge_from_chunks(
     async def _locked_rebuild_relationship(src, tgt, chunk_ids):
         nonlocal rebuilt_relationships_count, failed_relationships_count
         async with semaphore:
-            workspace = global_config.get("workspace", "")
             namespace = f"{workspace}:GraphDB" if workspace else "GraphDB"
             sorted_key_parts = sorted([src, tgt])
             async with get_storage_keyed_lock(
@@ -199,7 +217,15 @@ async def rebuild_knowledge_from_chunks(
                         chunk_ids=chunk_ids,
                         chunk_relationships=chunk_relationships,
                         llm_response_cache=llm_response_cache,
-                        global_config=global_config,
+                        tokenizer=tokenizer,
+                        llm_service=llm_service,
+                        embedding_service=embedding_service,
+                        max_source_ids_per_relation=max_source_ids_per_relation,
+                        max_file_paths=max_file_paths,
+                        source_ids_limit_method=source_ids_limit_method,
+                        force_llm_summary_on_merge=force_llm_summary_on_merge,
+                        file_path_more_placeholder=file_path_more_placeholder,
+                        language=language,
                         relation_chunks_storage=relation_chunks_storage,
                         entity_chunks_storage=entity_chunks_storage,
                         pipeline_status=pipeline_status,
@@ -270,7 +296,15 @@ async def _rebuild_single_entity(
     chunk_ids: list[str],
     chunk_entities: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    tokenizer: Tokenizer,
+    llm_service: Any,
+    embedding_service: Any,
+    max_source_ids_per_entity: int,
+    max_file_paths: int,
+    source_ids_limit_method: str,
+    force_llm_summary_on_merge: int,
+    file_path_more_placeholder: str,
+    language: str,
     entity_chunks_storage: BaseKVStorage | None = None,
     pipeline_status: dict | None = None,
     pipeline_status_lock=None,
@@ -348,12 +382,12 @@ async def _rebuild_single_entity(
         )
 
     limit_method = (
-        global_config.get("source_ids_limit_method") or SOURCE_IDS_LIMIT_METHOD_KEEP
+        source_ids_limit_method or SOURCE_IDS_LIMIT_METHOD_KEEP
     )
 
     limited_chunk_ids = apply_source_ids_limit(
         normalized_chunk_ids,
-        global_config["max_source_ids_per_entity"],
+        max_source_ids_per_entity,
         limit_method,
         identifier=f"`{entity_name}`",
     )
@@ -400,7 +434,11 @@ async def _rebuild_single_entity(
                 entity_name,
                 description_list,
                 GRAPH_FIELD_SEP,
-                global_config,
+                tokenizer=tokenizer,
+                force_llm_summary_on_merge=force_llm_summary_on_merge,
+                llm_service=llm_service,
+                language=language,
+                embedding_service=embedding_service,
                 llm_response_cache=llm_response_cache,
             )
         else:
@@ -433,11 +471,9 @@ async def _rebuild_single_entity(
                 seen_paths.add(file_path)
 
     # Apply MAX_FILE_PATHS limit
-    max_file_paths = global_config.get("max_file_paths")
-    file_path_placeholder = global_config.get(
-        "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-    )
-    limit_method = global_config.get("source_ids_limit_method")
+    limit_method = source_ids_limit_method
+    file_path_placeholder = file_path_more_placeholder
+    limit_method = source_ids_limit_method
 
     original_count = len(file_paths_list)
     if original_count > max_file_paths:
@@ -473,7 +509,11 @@ async def _rebuild_single_entity(
             entity_name,
             description_list,
             GRAPH_FIELD_SEP,
-            global_config,
+            tokenizer=tokenizer,
+            force_llm_summary_on_merge=force_llm_summary_on_merge,
+            llm_service=llm_service,
+            language=language,
+            embedding_service=embedding_service,
             llm_response_cache=llm_response_cache,
         )
     else:
@@ -515,7 +555,15 @@ async def _rebuild_single_relationship(
     chunk_ids: list[str],
     chunk_relationships: dict,
     llm_response_cache: BaseKVStorage,
-    global_config: dict[str, str],
+    tokenizer: Tokenizer,
+    llm_service: Any,
+    embedding_service: Any,
+    max_source_ids_per_relation: int,
+    max_file_paths: int,
+    source_ids_limit_method: str,
+    force_llm_summary_on_merge: int,
+    file_path_more_placeholder: str,
+    language: str,
     relation_chunks_storage: BaseKVStorage | None = None,
     entity_chunks_storage: BaseKVStorage | None = None,
     pipeline_status: dict | None = None,
@@ -547,11 +595,11 @@ async def _rebuild_single_relationship(
         )
 
     limit_method = (
-        global_config.get("source_ids_limit_method") or SOURCE_IDS_LIMIT_METHOD_KEEP
+        source_ids_limit_method or SOURCE_IDS_LIMIT_METHOD_KEEP
     )
     limited_chunk_ids = apply_source_ids_limit(
         normalized_chunk_ids,
-        global_config["max_source_ids_per_relation"],
+        max_source_ids_per_relation,
         limit_method,
         identifier=f"`{src}`~`{tgt}`",
     )
@@ -590,11 +638,7 @@ async def _rebuild_single_relationship(
                 seen_paths.add(file_path)
 
     # Apply count limit
-    max_file_paths = global_config.get("max_file_paths")
-    file_path_placeholder = global_config.get(
-        "file_path_more_placeholder", DEFAULT_FILE_PATH_MORE_PLACEHOLDER
-    )
-    limit_method = global_config.get("source_ids_limit_method")
+    limit_method = source_ids_limit_method
 
     original_count = len(file_paths_list)
     if original_count > max_file_paths:
@@ -631,7 +675,11 @@ async def _rebuild_single_relationship(
             f"{src}-{tgt}",
             description_list,
             GRAPH_FIELD_SEP,
-            global_config,
+            tokenizer=tokenizer,
+            force_llm_summary_on_merge=force_llm_summary_on_merge,
+            llm_service=llm_service,
+            language=language,
+            embedding_service=embedding_service,
             llm_response_cache=llm_response_cache,
         )
     else:

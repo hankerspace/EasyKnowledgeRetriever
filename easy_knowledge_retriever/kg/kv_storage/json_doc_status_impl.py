@@ -10,15 +10,15 @@ from .base import (
 from easy_knowledge_retriever.utils.file_utils import load_json, write_json
 from easy_knowledge_retriever.utils.logger import logger
 from easy_knowledge_retriever.utils.text_utils import get_pinyin_sort_key
-from .exceptions import StorageNotInitializedError
-from .shared_memory import (
+from ..exceptions import StorageNotInitializedError
+from ..shared_memory import (
     get_namespace_data,
     get_update_flag,
     set_all_update_flags,
     clear_all_update_flags,
     try_initialize_namespace,
 )
-from .concurrency import (
+from ..concurrency import (
     get_namespace_lock,
     get_data_init_lock,
 )

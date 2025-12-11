@@ -67,17 +67,17 @@ STORAGE_ENV_REQUIREMENTS: dict[str, list[str]] = {
 
 # Storage implementation module mapping
 STORAGES = {
-    "NetworkXStorage": ".kg.networkx_impl",
-    "NanoVectorDBStorage": ".kg.nano_vector_db_impl",
-    "JsonKVStorage": ".kg.json_kv_impl",
-    "JsonDocStatusStorage": ".kg.json_doc_status_impl",
-    "Neo4JStorage": ".kg.neo4j_impl",
-    "MilvusVectorDBStorage": ".kg.milvus_impl",
-    "PGKVStorage": ".kg.postgres_impl",
-    "PGVectorStorage": ".kg.postgres_impl",
-    "AGEStorage": ".kg.age_impl",
-    "PGGraphStorage": ".kg.postgres_impl",
-    "PGDocStatusStorage": ".kg.postgres_impl",
+    "NetworkXStorage": "easy_knowledge_retriever.kg.graph_storage.networkx_impl",
+    "NanoVectorDBStorage": "easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl",
+    "JsonKVStorage": "easy_knowledge_retriever.kg.kv_storage.json_kv_impl",
+    "JsonDocStatusStorage": "easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl",
+    "Neo4JStorage": "easy_knowledge_retriever.kg.graph_storage.neo4j_impl",
+    "MilvusVectorDBStorage": "easy_knowledge_retriever.kg.vector_storage.milvus_impl",
+    "PGKVStorage": "easy_knowledge_retriever.kg.kv_storage.postgres_impl",
+    "PGVectorStorage": "easy_knowledge_retriever.kg.vector_storage.postgres_impl",
+    "AGEStorage": "easy_knowledge_retriever.kg.age_impl",
+    "PGGraphStorage": "easy_knowledge_retriever.kg.graph_storage.postgres_impl",
+    "PGDocStatusStorage": "easy_knowledge_retriever.kg.kv_storage.postgres_impl",
 
 
 }

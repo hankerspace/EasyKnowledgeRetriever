@@ -32,22 +32,14 @@ from easy_knowledge_retriever.llm.service import BaseLLMService, BaseEmbeddingSe
 from easy_knowledge_retriever.llm.prompts import PROMPTS
 from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
 from easy_knowledge_retriever.constants import (
+
     DEFAULT_MAX_GLEANING,
     DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
-    DEFAULT_TOP_K,
-    DEFAULT_CHUNK_TOP_K,
-    DEFAULT_MAX_ENTITY_TOKENS,
-    DEFAULT_MAX_RELATION_TOKENS,
-    DEFAULT_MAX_TOTAL_TOKENS,
-    DEFAULT_COSINE_THRESHOLD,
-    DEFAULT_RELATED_CHUNK_NUMBER,
-    DEFAULT_KG_CHUNK_PICK_METHOD,
-
     DEFAULT_MAX_GRAPH_NODES,
     DEFAULT_MAX_SOURCE_IDS_PER_ENTITY,
     DEFAULT_MAX_SOURCE_IDS_PER_RELATION,
     DEFAULT_ENTITY_TYPES,
-    DEFAULT_SUMMARY_LANGUAGE,
+
     DEFAULT_SOURCE_IDS_LIMIT_METHOD,
     DEFAULT_MAX_FILE_PATHS,
     DEFAULT_FILE_PATH_MORE_PLACEHOLDER,
@@ -60,9 +52,14 @@ from easy_knowledge_retriever.kg.registry import (
     STORAGES,
     verify_storage_implementation,
 )
-from easy_knowledge_retriever.config.global_config import GlobalConfig
 
-from easy_knowledge_retriever.config.rerank_config import RerankConfig
+
+
+
+from easy_knowledge_retriever.retrieval.base import BaseRetrieval
+from easy_knowledge_retriever.retrieval.retrieval_factory import RetrievalFactory
+from easy_knowledge_retriever.reranker.base import BaseRerankerService
+from easy_knowledge_retriever.reranker.openai import OpenAIRerankerService
 
 
 
@@ -77,19 +74,21 @@ from easy_knowledge_retriever.kg.concurrency import (
 )
 
 from easy_knowledge_retriever.kg.base import (
-    BaseGraphStorage,
-    BaseKVStorage,
-    BaseVectorStorage,
-    DocProcessingStatus,
-    DocStatus,
-    DocStatusStorage,
     QueryParam,
     StorageNameSpace,
     StoragesStatus,
     DeletionResult,
-
     QueryResult,
+    QueryContextResult,
 )
+from easy_knowledge_retriever.kg.kv_storage.base import (
+    BaseKVStorage,
+    DocStatusStorage,
+    DocStatus,
+    DocProcessingStatus,
+)
+from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
+from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.kg.services import (
     BaseKVStorageService,
     BaseVectorStorageService,
@@ -107,7 +106,7 @@ from easy_knowledge_retriever.operations.graph_ops import (
     merge_nodes_and_edges,
     rebuild_knowledge_from_chunks,
 )
-from easy_knowledge_retriever.operations.query import (
+from easy_knowledge_retriever.retrieval.query_processing import (
     kg_query,
     naive_query,
 )
@@ -172,41 +171,41 @@ class EasyKnowledgeRetriever:
     # Query parameters
     # ---
 
-    top_k: int = field(default=DEFAULT_TOP_K)
+    top_k: int = field(default=40)
     """Number of entities/relations to retrieve for each query."""
 
     chunk_top_k: int = field(
-        default=DEFAULT_CHUNK_TOP_K
+        default=20
     )
     """Maximum number of chunks in context."""
 
     max_entity_tokens: int = field(
-        default=DEFAULT_MAX_ENTITY_TOKENS
+        default=6000
     )
     """Maximum number of tokens for entity in context."""
 
     max_relation_tokens: int = field(
-        default=DEFAULT_MAX_RELATION_TOKENS
+        default=8000
     )
     """Maximum number of tokens for relation in context."""
 
     max_total_tokens: int = field(
-        default=DEFAULT_MAX_TOTAL_TOKENS
+        default=30000
     )
     """Maximum total tokens in context (including system prompt, entities, relations and chunks)."""
 
     cosine_threshold: int = field(
-        default=DEFAULT_COSINE_THRESHOLD
+        default=0.2
     )
     """Cosine threshold of vector DB retrieval for entities, relations and chunks."""
 
     related_chunk_number: int = field(
-        default=DEFAULT_RELATED_CHUNK_NUMBER
+        default=5
     )
     """Number of related chunks to grab from single entity or relation."""
 
     kg_chunk_pick_method: str = field(
-        default=DEFAULT_KG_CHUNK_PICK_METHOD
+        default="VECTOR"
     )
     """Method for selecting text chunks: 'WEIGHT' for weight-based selection, 'VECTOR' for embedding similarity-based selection."""
 
@@ -304,8 +303,8 @@ class EasyKnowledgeRetriever:
     # Rerank Configuration
     # ---
 
-    rerank_model_func: Callable[..., object] | None = field(default=None)
-    """Function for reranking retrieved documents. All rerank configurations (model name, API keys, top_k, etc.) should be included in this function. Optional."""
+    reranker_service: Optional[BaseRerankerService] = field(default=None)
+    """Service for reranking retrieved documents. Optional."""
 
 
     """Minimum rerank score threshold for filtering chunks after reranking."""
@@ -358,7 +357,7 @@ class EasyKnowledgeRetriever:
     file_path_more_placeholder: str = field(default=DEFAULT_FILE_PATH_MORE_PLACEHOLDER)
     """Placeholder text when file paths exceed max_file_paths limit."""
 
-    language: str = DEFAULT_SUMMARY_LANGUAGE
+    language: str = "English"
     entity_types: List[str] = field(default_factory=lambda: DEFAULT_ENTITY_TYPES)
 
     cosine_better_than_threshold: float = field(
@@ -390,16 +389,7 @@ class EasyKnowledgeRetriever:
             logger.info(f"Creating working directory {self.working_dir}")
             os.makedirs(self.working_dir)
 
-        current_config_dict = asdict(self)
-        
-        # Create a temporary global config to pass to factory
-        # Note: self has fields that match GlobalConfig. 
-        # We filter keys that exist in GlobalConfig
-        global_config_keys = GlobalConfig.__dataclass_fields__.keys()
-        global_config_data = {k: v for k, v in current_config_dict.items() if k in global_config_keys}
-        
-             
-        self._global_config_obj = GlobalConfig(**global_config_data)
+
 
         from easy_knowledge_retriever.kg.shared_memory import (
             initialize_share_data,
@@ -464,10 +454,9 @@ class EasyKnowledgeRetriever:
         
         # Validations involving LLM configs are deferred or skipped as those configs are now in llm_service
 
-        # Fix global_config now
-        global_config = asdict(self)
-
-        _print_config = ",\n  ".join([f"{k} = {v}" for k, v in global_config.items()])
+        # Log configuration
+        config_dict = asdict(self)
+        _print_config = ",\n  ".join([f"{k} = {v}" for k, v in config_dict.items()])
         logger.debug(f"EasyKnowledgeRetriever init with param:\n  {_print_config}\n")
 
         # Init Embedding
@@ -487,43 +476,45 @@ class EasyKnowledgeRetriever:
 
         # Initialize all storages using Factory (Service pattern)
 
-        # Prepare config with tokenizer for storages
-        storage_config_dict = self._global_config_obj.to_dict()
-        storage_config_dict["tokenizer"] = self.tokenizer
-
-        # Update existing services configurations if they were passed as objects
-        # This is critical when services are injected (e.g. from Factory) but created with a GlobalConfig that lacks tokenizer
-        services_to_update = [
-            self.kv_storage,
-            self.vector_storage,
-            self.graph_storage,
-            self.doc_status_storage
-        ]
-        
-        for service in services_to_update:
-            if not isinstance(service, str) and hasattr(service, 'global_config') and isinstance(service.global_config, dict):
-                 if "tokenizer" not in service.global_config or service.global_config["tokenizer"] is None:
-                     service.global_config["tokenizer"] = self.tokenizer
-                     logger.debug(f"Injected tokenizer into existing service {service.__class__.__name__}")
-
         # 1. Initialize Services from strings if necessary (Legacy/Config support)
         if isinstance(self.kv_storage, str):
-            self.kv_storage = KVStorageService(self.kv_storage, storage_config_dict, self.workspace)
-        
+            self.kv_storage = KVStorageService(
+                storage_name=self.kv_storage, 
+                workspace=self.workspace,
+                working_dir=self.working_dir,
+            )
+        else:
+             # If passed as object, ensure working_dir is set if possible (duck typing check)
+             pass
+                 
         if isinstance(self.vector_storage, str):
             cosine_threshold = self.cosine_better_than_threshold
             self.vector_storage = VectorStorageService(
-                self.vector_storage, 
-                storage_config_dict, 
-                self.workspace, 
-                cosine_better_than_threshold=cosine_threshold
+                storage_name=self.vector_storage, 
+                workspace=self.workspace,
+                working_dir=self.working_dir,
+                cosine_better_than_threshold=cosine_threshold,
             )
-
+        else:
+             pass
+        
         if isinstance(self.graph_storage, str):
-            self.graph_storage = GraphStorageService(self.graph_storage, storage_config_dict, self.workspace)
+            self.graph_storage = GraphStorageService(
+                storage_name=self.graph_storage, 
+                workspace=self.workspace,
+                working_dir=self.working_dir,
+            )
+        else:
+             pass
 
         if isinstance(self.doc_status_storage, str):
-            self.doc_status_storage = DocStatusStorageService(self.doc_status_storage, storage_config_dict, self.workspace)
+            self.doc_status_storage = DocStatusStorageService(
+                storage_name=self.doc_status_storage, 
+                workspace=self.workspace,
+                working_dir=self.working_dir,
+            )
+        else:
+             pass
 
         # 2. Create actual storage instances using services
         
@@ -531,58 +522,42 @@ class EasyKnowledgeRetriever:
         self.llm_response_cache: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_LLM_RESPONSE_CACHE,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.text_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_TEXT_CHUNKS,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.full_docs: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_DOCS,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.full_entities: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_ENTITIES,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.full_relations: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_FULL_RELATIONS,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.entity_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_ENTITY_CHUNKS,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         self.relation_chunks: BaseKVStorage = self.kv_storage.create(
             namespace=NameSpace.KV_STORE_RELATION_CHUNKS,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         # Graph Storage
         self.chunk_entity_relation_graph: BaseGraphStorage = self.graph_storage.create(
             namespace=NameSpace.GRAPH_STORE_CHUNK_ENTITY_RELATION,
             embedding_func=self.embedding_func,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         # Vector Storages
@@ -596,34 +571,26 @@ class EasyKnowledgeRetriever:
             meta_fields={"entity_name", "source_id", "content", "file_path"},
             cosine_better_than_threshold=cosine_threshold,
             embedding_dim=embedding_dim,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
         self.relationships_vdb: BaseVectorStorage = self.vector_storage.create(
             namespace=NameSpace.VECTOR_STORE_RELATIONSHIPS,
             embedding_func=self.embedding_func,
-            meta_fields={"src_id", "tgt_id", "source_id", "content", "file_path"},
+            meta_fields={"src_id", "tgt_id", "description", "keywords", "weight", "source_id", "file_path"},
             cosine_better_than_threshold=cosine_threshold,
             embedding_dim=embedding_dim,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
         self.chunks_vdb: BaseVectorStorage = self.vector_storage.create(
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
             embedding_func=self.embedding_func,
-            meta_fields={"full_doc_id", "content", "file_path"},
+            meta_fields={"content", "full_doc_id", "source_id", "file_path"},
             cosine_better_than_threshold=cosine_threshold,
             embedding_dim=embedding_dim,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
         )
 
         # Doc Status Storage
         self.doc_status: DocStatusStorage = self.doc_status_storage.create(
             namespace=NameSpace.DOC_STATUS,
-            embedding_func=None,
-            working_dir=self.working_dir,
-            workspace=self.workspace,
+            embedding_func=self.embedding_func,
         )
 
         # Directly use llm_response_cache, don't create a new object
@@ -1072,23 +1039,23 @@ class EasyKnowledgeRetriever:
     def _get_storage_class(self, storage_name: str) -> Callable[..., Any]:
         # Direct imports for default storage implementations
         if storage_name == "JsonKVStorage":
-            from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
+            from easy_knowledge_retriever.kg.kv_storage.json_kv_impl import JsonKVStorage
 
             return JsonKVStorage
         elif storage_name == "NanoVectorDBStorage":
-            from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
+            from easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl import NanoVectorDBStorage
 
             return NanoVectorDBStorage
         elif storage_name == "NetworkXStorage":
-            from easy_knowledge_retriever.kg.networkx_impl import NetworkXStorage
+            from easy_knowledge_retriever.kg.graph_storage.networkx_impl import NetworkXStorage
 
             return NetworkXStorage
         elif storage_name == "JsonDocStatusStorage":
-            from easy_knowledge_retriever.kg.json_doc_status_impl import JsonDocStatusStorage
+            from easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl import JsonDocStatusStorage
 
             return JsonDocStatusStorage
         elif storage_name == "MilvusVectorDBStorage":
-            from easy_knowledge_retriever.kg.milvus_impl import MilvusVectorDBStorage
+            from easy_knowledge_retriever.kg.vector_storage.milvus_impl import MilvusVectorDBStorage
 
             return MilvusVectorDBStorage
         else:
@@ -1132,13 +1099,14 @@ class EasyKnowledgeRetriever:
                 track_id,
             )
         )
-    async def ingest(self, file_path: str, **kwargs) -> Dict[str, Any]:
+    async def ingest(self, file_path: str, start_page: Optional[int] = None, end_page: Optional[int] = None) -> Dict[str, Any]:
         """
         Ingest a document using Mineru parser.
 
         Args:
             file_path: Path to the document file (PDF).
-            **kwargs: Additional arguments passed to the parser (e.g. start_page, end_page).
+            start_page: Optional start page index (0-based).
+            end_page: Optional end page index (0-based) or count.
             
         Returns:
             The parsed data structure.
@@ -1179,7 +1147,7 @@ class EasyKnowledgeRetriever:
             
             if parsed_data is None:
                 print(f"Parsing document: {file_path}...")
-                parsed_data = parser.parse(file_path, **kwargs)
+                parsed_data = parser.parse(file_path, start_page=start_page, end_page=end_page)
             
             # --- Multimodal Processing (Image Summarization) ---
             if self.llm_model_func:
@@ -1223,8 +1191,9 @@ class EasyKnowledgeRetriever:
                                 
                                 # Option A: Append to page content (Simplest for retrieval)
                                 # " [IMAGE SUMMARY: ... ] "
-                                image_context = f"\n\n[IMAGE on Page {page_num}]\nSummary: {summary}\nImage Path: {img_path}\n"
+                                image_context = f"\\n\\n[IMAGE on Page {page_num}]\\nSummary: {summary}\\nImage Path: {img_path}\\n"
                                 page["content"] += image_context
+
                                 
                                 # Also update main content if it matters (usually main content is concatenation of pages)
                                 # But ainsert likely uses pages if provided?
@@ -1283,78 +1252,6 @@ class EasyKnowledgeRetriever:
         )
 
         return track_id
-
-    # TODO: deprecated, use insert instead
-    def insert_custom_chunks(
-        self,
-        full_text: str,
-        text_chunks: list[str],
-        doc_id: str | list[str] | None = None,
-    ) -> None:
-        loop = always_get_an_event_loop()
-        loop.run_until_complete(
-            self.ainsert_custom_chunks(full_text, text_chunks, doc_id)
-        )
-
-    # TODO: deprecated, use ainsert instead
-    async def ainsert_custom_chunks(
-        self, full_text: str, text_chunks: list[str], doc_id: str | None = None
-    ) -> None:
-        update_storage = False
-        try:
-            # Clean input texts
-            full_text = sanitize_text_for_encoding(full_text)
-            text_chunks = [sanitize_text_for_encoding(chunk) for chunk in text_chunks]
-            file_path = ""
-
-            # Process cleaned texts
-            if doc_id is None:
-                doc_key = compute_mdhash_id(full_text, prefix="doc-")
-            else:
-                doc_key = doc_id
-            new_docs = {doc_key: {"content": full_text, "file_path": file_path}}
-
-            _add_doc_keys = await self.full_docs.filter_keys({doc_key})
-            new_docs = {k: v for k, v in new_docs.items() if k in _add_doc_keys}
-            if not len(new_docs):
-                logger.warning("This document is already in the storage.")
-                return
-
-            update_storage = True
-            logger.info(f"Inserting {len(new_docs)} docs")
-
-            inserting_chunks: dict[str, Any] = {}
-            for index, chunk_text in enumerate(text_chunks):
-                chunk_key = compute_mdhash_id(chunk_text, prefix="chunk-")
-                tokens = len(self.tokenizer.encode(chunk_text))
-                inserting_chunks[chunk_key] = {
-                    "content": chunk_text,
-                    "full_doc_id": doc_key,
-                    "tokens": tokens,
-                    "chunk_order_index": index,
-                    "file_path": file_path,
-                }
-
-            doc_ids = set(inserting_chunks.keys())
-            add_chunk_keys = await self.text_chunks.filter_keys(doc_ids)
-            inserting_chunks = {
-                k: v for k, v in inserting_chunks.items() if k in add_chunk_keys
-            }
-            if not len(inserting_chunks):
-                logger.warning("All chunks are already in the storage.")
-                return
-
-            tasks = [
-                self.chunks_vdb.upsert(inserting_chunks),
-                self._process_extract_entities(inserting_chunks),
-                self.full_docs.upsert(new_docs),
-                self.text_chunks.upsert(inserting_chunks),
-            ]
-            await asyncio.gather(*tasks)
-
-        finally:
-            if update_storage:
-                await self._insert_done()
 
     async def apipeline_enqueue_documents(
         self,
@@ -2521,10 +2418,24 @@ class EasyKnowledgeRetriever:
             if update_storage:
                 await self._insert_done()
 
+    async def retrieve(self, query: str, retrieval: BaseRetrieval) -> QueryContextResult:
+        """
+        Execute the retrieval strategy.
+
+        Args:
+            query: Query text.
+            retrieval: Retrieval strategy object.
+
+        Returns:
+            QueryContextResult: Context data.
+        """
+        return await retrieval.retrieve(query, self)
+
     def query(
         self,
         query: str,
         param: QueryParam = QueryParam(),
+        retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
     ) -> str | Iterator[str]:
         """
@@ -2533,6 +2444,7 @@ class EasyKnowledgeRetriever:
         Args:
             query (str): The query to be executed.
             param (QueryParam): Configuration parameters for query execution.
+            retrieval (BaseRetrieval): Retrieval strategy object.
             prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior. Defaults to None, which uses PROMPTS["rag_response"].
 
         Returns:
@@ -2540,12 +2452,13 @@ class EasyKnowledgeRetriever:
         """
         loop = always_get_an_event_loop()
 
-        return loop.run_until_complete(self.aquery(query, param, system_prompt))  # type: ignore
+        return loop.run_until_complete(self.aquery(query, param, retrieval, system_prompt))  # type: ignore
 
     async def aquery(
         self,
         query: str,
         param: QueryParam = QueryParam(),
+        retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
     ) -> str | AsyncIterator[str]:
         """
@@ -2558,6 +2471,7 @@ class EasyKnowledgeRetriever:
             query (str): The query to be executed.
             param (QueryParam): Configuration parameters for query execution.
                 If param.model_func is provided, it will be used instead of the global model.
+            retrieval (BaseRetrieval): Retrieval strategy object.
             system_prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior. Defaults to None, which uses PROMPTS["rag_response"].
 
         Returns:
@@ -2566,7 +2480,7 @@ class EasyKnowledgeRetriever:
                 - Streaming: Returns AsyncIterator[str]
         """
         # Call the new aquery_llm function to get complete results
-        result = await self.aquery_llm(query, param, system_prompt)
+        result = await self.aquery_llm(query, param, retrieval, system_prompt)
 
         # Extract and return only the LLM response for backward compatibility
         llm_response = result.get("llm_response", {})
@@ -2728,10 +2642,12 @@ class EasyKnowledgeRetriever:
             history_turns=param.history_turns,
             model_func=param.model_func,
             user_prompt=param.user_prompt,
-            enable_rerank=param.enable_rerank,
         )
 
         query_result = None
+        
+        # Create retrieval strategy with reranker
+        retrieval_strategy = RetrievalFactory.create_retrieval(data_param, self.reranker_service)
 
         if data_param.mode in ["local", "global", "hybrid", "mix"]:
             logger.debug(f"[aquery_data] Using kg_query for mode: {data_param.mode}")
@@ -2742,10 +2658,17 @@ class EasyKnowledgeRetriever:
                 self.relationships_vdb,
                 self.text_chunks,
                 data_param,  # Use data_param with only_need_context=True
-                global_config,
+                tokenizer=self.tokenizer,
+                llm_model_func=self.llm_model_func,
+                enable_llm_cache=self.enable_llm_cache,
+                max_total_tokens=data_param.max_total_tokens,
+                language=self.language,
+                kg_chunk_pick_method=self.kg_chunk_pick_method,
+                max_related_chunks=self.related_chunk_number,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 chunks_vdb=self.chunks_vdb,
+                retrieval=retrieval_strategy,
             )
         elif data_param.mode == "naive":
             logger.debug(f"[aquery_data] Using naive_query for mode: {data_param.mode}")
@@ -2753,9 +2676,13 @@ class EasyKnowledgeRetriever:
                 query.strip(),
                 self.chunks_vdb,
                 data_param,  # Use data_param with only_need_context=True
-                global_config,
+                tokenizer=self.tokenizer,
+                llm_model_func=self.llm_model_func,
+                max_total_tokens=data_param.max_total_tokens,
+                enable_llm_cache=self.enable_llm_cache,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
+                retrieval=retrieval_strategy,
             )
         elif data_param.mode == "bypass":
             logger.debug("[aquery_data] Using bypass mode")
@@ -2804,10 +2731,31 @@ class EasyKnowledgeRetriever:
         await self._query_done()
         return final_data
 
+    def _fill_param_defaults(self, param: QueryParam):
+        """
+        Fill defaults in QueryParam from EasyKnowledgeRetriever configuration
+        if the values in QueryParam are None.
+        """
+        if param.top_k is None:
+            param.top_k = self.top_k
+            
+        if param.chunk_top_k is None:
+            param.chunk_top_k = self.chunk_top_k
+            
+        if param.max_entity_tokens is None:
+            param.max_entity_tokens = self.max_entity_tokens
+            
+        if param.max_relation_tokens is None:
+            param.max_relation_tokens = self.max_relation_tokens
+            
+        if param.max_total_tokens is None:
+            param.max_total_tokens = self.max_total_tokens
+
     async def aquery_llm(
         self,
         query: str,
         param: QueryParam = QueryParam(),
+        retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -2819,6 +2767,7 @@ class EasyKnowledgeRetriever:
         Args:
             query: Query text for retrieval and LLM generation.
             param: Query parameters controlling retrieval and LLM behavior.
+            retrieval: Retrieval strategy object.
             system_prompt: Optional custom system prompt for LLM generation.
 
         Returns:
@@ -2826,34 +2775,20 @@ class EasyKnowledgeRetriever:
         """
         logger.debug(f"[aquery_llm] Query param: {param}")
 
+        # Fill default parameters from configuration if they are None
+        self._fill_param_defaults(param)
+
         global_config = asdict(self)
 
         try:
-            query_result = None
+            if retrieval is None:
+                retrieval = RetrievalFactory.create_retrieval(param)
 
-            if param.mode in ["local", "global", "hybrid", "mix"]:
-                query_result = await kg_query(
-                    query.strip(),
-                    self.chunk_entity_relation_graph,
-                    self.entities_vdb,
-                    self.relationships_vdb,
-                    self.text_chunks,
-                    param,
-                    global_config,
-                    hashing_kv=self.llm_response_cache,
-                    system_prompt=system_prompt,
-                    chunks_vdb=self.chunks_vdb,
-                )
-            elif param.mode == "naive":
-                query_result = await naive_query(
-                    query.strip(),
-                    self.chunks_vdb,
-                    param,
-                    global_config,
-                    hashing_kv=self.llm_response_cache,
-                    system_prompt=system_prompt,
-                )
-            elif param.mode == "bypass":
+            # Logic specific to Bypass vs others
+            from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval
+            is_bypass = isinstance(retrieval, BypassRetrieval)
+
+            if is_bypass:
                 # Bypass mode: directly use LLM without knowledge retrieval
                 use_llm_func = param.model_func or global_config["llm_model_func"]
                 # Apply higher priority (8) to entity/relation summary tasks
@@ -2867,44 +2802,33 @@ class EasyKnowledgeRetriever:
                     enable_cot=True,
                     stream=param.stream,
                 )
-                if type(response) is str:
-                    return {
-                        "status": "success",
-                        "message": "Bypass mode LLM non streaming response",
-                        "data": {},
-                        "metadata": {},
-                        "llm_response": {
-                            "content": response,
-                            "response_iterator": None,
-                            "is_streaming": False,
-                        },
-                    }
-                else:
-                    return {
-                        "status": "success",
-                        "message": "Bypass mode LLM streaming response",
-                        "data": {},
-                        "metadata": {},
-                        "llm_response": {
-                            "content": None,
-                            "response_iterator": response,
-                            "is_streaming": True,
-                        },
-                    }
-            else:
-                raise ValueError(f"Unknown mode {param.mode}")
-
-            await self._query_done()
-
-            # Check if query_result is None
-            if query_result is None:
+                
+                is_streaming = not isinstance(response, str)
+                
                 return {
+                    "status": "success",
+                    "message": f"Bypass mode LLM {'streaming' if is_streaming else 'non streaming'} response",
+                    "data": {},
+                    "metadata": {},
+                    "llm_response": {
+                        "content": response if not is_streaming else None,
+                        "response_iterator": response if is_streaming else None,
+                        "is_streaming": is_streaming,
+                    },
+                }
+
+            # Standard RAG mode
+            query_context_result = await self.retrieve(query, retrieval)
+            
+            # Check if query_context_result is effectively empty/None (context string empty)
+            if not query_context_result.context and not query_context_result.raw_data:
+                 return {
                     "status": "failure",
                     "message": "Query returned no results",
                     "data": {},
                     "metadata": {
                         "failure_reason": "no_results",
-                        "mode": param.mode,
+                        "mode": retrieval.mode,
                     },
                     "llm_response": {
                         "content": PROMPTS["fail_response"],
@@ -2913,22 +2837,80 @@ class EasyKnowledgeRetriever:
                     },
                 }
 
-            # Extract structured data from query result
-            raw_data = query_result.raw_data or {}
-            raw_data["llm_response"] = {
-                "content": query_result.content
-                if not query_result.is_streaming
-                else None,
-                "response_iterator": query_result.response_iterator
-                if query_result.is_streaming
-                else None,
-                "is_streaming": query_result.is_streaming,
-            }
+            # Return different content based on query parameters
+            if param.only_need_context and not param.only_need_prompt:
+                raw_data = query_context_result.raw_data or {}
+                # Mimic QueryResult structure
+                raw_data["llm_response"] = {
+                    "content": query_context_result.context,
+                    "response_iterator": None,
+                    "is_streaming": False,
+                }
+                return raw_data
 
-            return raw_data
+            user_prompt = f"\n\n{param.user_prompt}" if param.user_prompt else "n/a"
+            response_type = (
+                param.response_type
+                if param.response_type
+                else "Multiple Paragraphs"
+            )
+
+            # Build system prompt
+            sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
+            sys_prompt = sys_prompt_temp.format(
+                response_type=response_type,
+                user_prompt=user_prompt,
+                context_data=query_context_result.context,
+            )
+            
+            if param.only_need_prompt:
+                 raw_data = query_context_result.raw_data or {}
+                 raw_data["llm_response"] = {
+                     "content": sys_prompt,
+                     "response_iterator": None,
+                     "is_streaming": False
+                 }
+                 return raw_data
+
+            # Generate
+            if param.model_func:
+                use_model_func = param.model_func
+            else:
+                use_model_func = global_config["llm_model_func"]
+                use_model_func = partial(use_model_func, _priority=5)
+
+            param.stream = True if param.stream is None else param.stream
+            
+            response = await use_model_func(
+                sys_prompt,
+                history_messages=param.conversation_history,
+                stream=param.stream,
+            )
+
+            is_streaming = not isinstance(response, str)
+            
+            # Build raw data response
+            result_data = {
+                "status": "success",
+                "message": "Query success",
+                "data": query_context_result.raw_data or {},
+                "metadata": {
+                    "mode": retrieval.mode,
+                    "param": asdict(param),
+                },
+                "llm_response": {
+                    "content": response if not is_streaming else None,
+                    "response_iterator": response if is_streaming else None,
+                    "is_streaming": is_streaming,
+                }
+            }
+            
+            await self._query_done()
+            return result_data
 
         except Exception as e:
             logger.error(f"Query failed: {e}")
+            logger.error(traceback.format_exc())
             # Return error response
             return {
                 "status": "failure",
@@ -2946,6 +2928,7 @@ class EasyKnowledgeRetriever:
         self,
         query: str,
         param: QueryParam = QueryParam(),
+        retrieval: BaseRetrieval = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -2957,13 +2940,14 @@ class EasyKnowledgeRetriever:
         Args:
             query: Query text for retrieval and LLM generation.
             param: Query parameters controlling retrieval and LLM behavior.
+            retrieval: Retrieval strategy object.
             system_prompt: Optional custom system prompt for LLM generation.
 
         Returns:
             dict[str, Any]: Same complete response format as aquery_llm.
         """
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.aquery_llm(query, param, system_prompt))
+        return loop.run_until_complete(self.aquery_llm(query, param, retrieval, system_prompt))
 
     async def _query_done(self):
         await self.llm_response_cache.index_done_callback()
@@ -3798,7 +3782,7 @@ class EasyKnowledgeRetriever:
         Returns:
             DeletionResult: An object containing the outcome of the deletion process.
         """
-        from easy_knowledge_retriever.kg.utils_graph import adelete_by_entity
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import adelete_by_entity
 
         return await adelete_by_entity(
             self.chunk_entity_relation_graph,
@@ -3831,7 +3815,7 @@ class EasyKnowledgeRetriever:
         Returns:
             DeletionResult: An object containing the outcome of the deletion process.
         """
-        from easy_knowledge_retriever.kg.utils_graph import adelete_by_relation
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import adelete_by_relation
         return await adelete_by_relation(
             self.chunk_entity_relation_graph,
             self.relationships_vdb,
@@ -3881,7 +3865,7 @@ class EasyKnowledgeRetriever:
         self, entity_name: str, include_vector_data: bool = False
     ) -> dict[str, str | None | dict[str, str]]:
         """Get detailed information of an entity"""
-        from easy_knowledge_retriever.kg.utils_graph import get_entity_info
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import get_entity_info
 
         return await get_entity_info(
             self.chunk_entity_relation_graph,
@@ -3894,7 +3878,7 @@ class EasyKnowledgeRetriever:
         self, src_entity: str, tgt_entity: str, include_vector_data: bool = False
     ) -> dict[str, str | None | dict[str, str]]:
         """Get detailed information of a relationship"""
-        from easy_knowledge_retriever.kg.utils_graph import get_relation_info
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import get_relation_info
 
         return await get_relation_info(
             self.chunk_entity_relation_graph,
@@ -3925,7 +3909,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing updated entity information
         """
-        from easy_knowledge_retriever.kg.utils_graph import aedit_entity
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import aedit_entity
 
         return await aedit_entity(
             self.chunk_entity_relation_graph,
@@ -3967,7 +3951,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing updated relation information
         """
-        from easy_knowledge_retriever.kg.utils_graph import aedit_relation
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import aedit_relation
 
         return await aedit_relation(
             self.chunk_entity_relation_graph,
@@ -4001,7 +3985,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing created entity information
         """
-        from easy_knowledge_retriever.kg.utils_graph import acreate_entity
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import acreate_entity
 
         return await acreate_entity(
             self.chunk_entity_relation_graph,
@@ -4032,7 +4016,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing created relation information
         """
-        from easy_knowledge_retriever.kg.utils_graph import acreate_relation
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import acreate_relation
 
         return await acreate_relation(
             self.chunk_entity_relation_graph,
@@ -4078,7 +4062,7 @@ class EasyKnowledgeRetriever:
         Returns:
             Dictionary containing the merged entity information
         """
-        from easy_knowledge_retriever.kg.utils_graph import amerge_entities
+        from easy_knowledge_retriever.kg.graph_storage.utils_graph import amerge_entities
 
         return await amerge_entities(
             self.chunk_entity_relation_graph,

@@ -697,23 +697,26 @@ async def aexport_data(
             txtfile.write("\n")
             txtfile.write("\n")
 
+from easy_knowledge_retriever.reranker.base import BaseRerankerService
+
 async def process_retrieved_chunks(
     query: str,
     unique_chunks: list[dict],
     query_param: Any,
-    global_config: dict,
     chunk_token_limit: int,
     source_type: str = "vector",
+    reranker_service: Optional[BaseRerankerService] = None,
 ) -> list[dict]:
     """Process and filter chunks for retrieval context.
     
     Args:
         query: Query string
         unique_chunks: List of chunk dictionaries
-        query_param: QueryParam object containing config like enable_rerank
+        query_param: QueryParam object
         global_config: Global configuration dict
         chunk_token_limit: Maximum tokens allowed for chunks
         source_type: Type of source ("vector" or "text")
+        reranker_service: Optional reranker service to use
         
     Returns:
         Filtered and sorted list of chunk dictionaries
@@ -722,9 +725,35 @@ async def process_retrieved_chunks(
         return []
 
     final_chunks = unique_chunks
-    # TODO: detailed rerank logic can be added here if needed, 
-    # currently we rely on truncate_list_by_token_size doing the heavy lifting 
-    # assuming order is already somewhat relevant (from vector search)
+    
+    if reranker_service:
+        try:
+            # Extract contents
+            contents = [c.get("content", "") for c in final_chunks]
+            # Rerank
+            rerank_results = await reranker_service.rerank(query, contents)
+            # Reorder unique_chunks based on results
+            # results is list of {index, relevance_score}
+            # Sort rerank results by score just in case, though rerank usually returns sorted
+            rerank_results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
+            
+            reordered_chunks = []
+            for r in rerank_results:
+                idx = r.get("index")
+                if idx is not None and 0 <= idx < len(final_chunks):
+                    reordered_chunks.append(final_chunks[idx])
+            
+            # If we lost some chunks (shouldn't happen if reranker behaves), append missing ones or just use reordered
+            if len(reordered_chunks) < len(final_chunks):
+                seen_indices = {r.get("index") for r in rerank_results}
+                for i, chunk in enumerate(final_chunks):
+                    if i not in seen_indices:
+                        reordered_chunks.append(chunk)
+            
+            final_chunks = reordered_chunks
+            logger.info(f"Reranked {len(final_chunks)} chunks using {reranker_service.__class__.__name__}")
+        except Exception as e:
+            logger.error(f"Reranking failed: {e}. Falling back to original order.")
 
     # 2. Token Truncation
     from easy_knowledge_retriever.utils.tokenizer import truncate_list_by_token_size

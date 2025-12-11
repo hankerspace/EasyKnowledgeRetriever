@@ -812,7 +812,7 @@ async def aedit_relation(
             #    - source_id has changed (edit scenario)
             #    - relation_chunks_storage has no existing data (migration/initialization scenario)
             if relation_chunks_storage is not None:
-                from .utils import (
+                from ..utils import (
                     make_relation_chunk_key,
                     compute_incremental_chunk_ids,
                 )
@@ -1114,7 +1114,7 @@ async def acreate_relation(
 
             # Update relation_chunks_storage to track chunk references
             if relation_chunks_storage is not None:
-                from .utils import make_relation_chunk_key
+                from ..utils import make_relation_chunk_key
 
                 # Normalize entity order for consistent key generation
                 normalized_src, normalized_tgt = sorted([source_entity, target_entity])
@@ -1284,7 +1284,7 @@ async def _merge_entities_impl(
 
         # Collect old chunk tracking key for deletion
         if relation_chunks_storage is not None:
-            from .utils import make_relation_chunk_key
+            from ..utils import make_relation_chunk_key
 
             old_storage_key = make_relation_chunk_key(src, tgt)
             old_relation_keys_to_delete.append(old_storage_key)

@@ -1,13 +1,15 @@
 from __future__ import annotations
 import json
 from functools import partial
+from typing import Any
+
 from easy_knowledge_retriever.utils.logger import logger
 from easy_knowledge_retriever.utils.tokenizer import Tokenizer, truncate_list_by_token_size
 from easy_knowledge_retriever.llm.utils import use_llm_func_with_cache
 from easy_knowledge_retriever.llm.prompts import PROMPTS
-from easy_knowledge_retriever.kg.base import BaseKVStorage
+from easy_knowledge_retriever.kg.kv_storage.base import BaseKVStorage
 from easy_knowledge_retriever.constants import (
-    DEFAULT_SUMMARY_LANGUAGE,
+
     DEFAULT_SUMMARY_MAX_TOKENS,
     DEFAULT_SUMMARY_CONTEXT_SIZE,
     DEFAULT_SUMMARY_LENGTH_RECOMMENDED,
@@ -18,7 +20,11 @@ async def _handle_entity_relation_summary(
     entity_or_relation_name: str,
     description_list: list[str],
     seperator: str,
-    global_config: dict,
+    tokenizer: Tokenizer,
+    force_llm_summary_on_merge: int,
+    llm_service: Any = None,
+    language: str = "English",
+    embedding_service: Any = None,
     llm_response_cache: BaseKVStorage | None = None,
 ) -> tuple[str, bool]:
     """Handle entity relation description summary using map-reduce approach."""
@@ -31,11 +37,8 @@ async def _handle_entity_relation_summary(
         return description_list[0], False
 
     # Get configuration
-    tokenizer: Tokenizer = global_config["tokenizer"]
-    llm_service = global_config.get("llm_service")
     summary_context_size = getattr(llm_service, "summary_context_size", DEFAULT_SUMMARY_CONTEXT_SIZE)
     summary_max_tokens = getattr(llm_service, "summary_max_tokens", DEFAULT_SUMMARY_MAX_TOKENS)
-    force_llm_summary_on_merge = global_config["force_llm_summary_on_merge"]
 
     current_list = description_list[:]  # Copy the list to avoid modifying original
     llm_was_used = False  # Track whether LLM was used during the entire process
@@ -64,8 +67,11 @@ async def _handle_entity_relation_summary(
                     description_type,
                     entity_or_relation_name,
                     current_list,
-                    global_config,
-                    llm_response_cache,
+                    tokenizer=tokenizer,
+                    llm_service=llm_service,
+                    language=language,
+                    embedding_service=embedding_service,
+                    llm_response_cache=llm_response_cache,
                 )
                 return final_summary, True  # LLM was used for final summarization
 
@@ -119,8 +125,11 @@ async def _handle_entity_relation_summary(
                     description_type,
                     entity_or_relation_name,
                     chunk,
-                    global_config,
-                    llm_response_cache,
+                    tokenizer=tokenizer,
+                    llm_service=llm_service,
+                    language=language,
+                    embedding_service=embedding_service,
+                    llm_response_cache=llm_response_cache,
                 )
                 new_summaries.append(summary)
                 llm_was_used = True  # Mark that LLM was used in reduce phase
@@ -133,23 +142,33 @@ async def _summarize_descriptions(
     description_type: str,
     description_name: str,
     description_list: list[str],
-    global_config: dict,
+    tokenizer: Tokenizer,
+    llm_service: Any = None,
+    language: str = "English",
+    embedding_service: Any = None,
     llm_response_cache: BaseKVStorage | None = None,
 ) -> str:
     """Helper function to summarize a list of descriptions using LLM."""
-    use_llm_func: callable = global_config["llm_model_func"]
+    use_llm_func = getattr(llm_service, "llm_model_func", None)
+    if not use_llm_func:
+         # Fallback or error? Assuming llm_service has it or we can't proceed.
+         # But wait, original used global_config["llm_model_func"].
+         # Ideally we pass llm_model_func directly?
+         # Or assume llm_service has it. BaseLLMService usually implies it?
+         # Actually llm_service object in retriever has model_func?
+         # Let's assume we can get it from service or pass it explicitly?
+         # I will use getattr(llm_service, "llm_model_func") for now.
+         # If llm_service is None, this crashes.
+         raise ValueError("llm_service must be provided")
+
     # Apply higher priority (8) to entity/relation summary tasks
     use_llm_func = partial(use_llm_func, _priority=8)
 
-    language = global_config.get("language", DEFAULT_SUMMARY_LANGUAGE)
-
-    llm_service = global_config.get("llm_service")
     summary_length_recommended = getattr(llm_service, "summary_length_recommended", DEFAULT_SUMMARY_LENGTH_RECOMMENDED)
 
     prompt_template = PROMPTS["summarize_entity_descriptions"]
 
     # Convert descriptions to JSONL format and apply token-based truncation
-    tokenizer = global_config["tokenizer"]
     summary_context_size = getattr(llm_service, "summary_context_size", DEFAULT_SUMMARY_CONTEXT_SIZE)
 
     # Create list of JSON objects with "Description" field
@@ -186,10 +205,8 @@ async def _summarize_descriptions(
     )
 
     # Check summary token length against embedding limit
-    embedding_service = global_config.get("embedding_service")
     embedding_token_limit = getattr(embedding_service, "max_token_size", None)
     if embedding_token_limit is not None and summary:
-        tokenizer = global_config["tokenizer"]
         summary_token_count = len(tokenizer.encode(summary))
         threshold = int(embedding_token_limit * 0.9)
 

@@ -14,7 +14,7 @@ from tenacity import (
 
 import logging
 from ..utils import logger
-from ..base import BaseGraphStorage
+from .base import BaseGraphStorage
 from ..types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 from easy_knowledge_retriever.kg.concurrency import get_data_init_lock
 from easy_knowledge_retriever.constants import DEFAULT_MAX_GRAPH_NODES

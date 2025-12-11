@@ -12,13 +12,14 @@ from easy_knowledge_retriever.utils.text_utils import (
 from easy_knowledge_retriever.utils.common_utils import update_chunk_cache_list, create_prefixed_exception
 from easy_knowledge_retriever.constants import (
     DEFAULT_ENTITY_NAME_MAX_LENGTH,
-    DEFAULT_SUMMARY_LANGUAGE,
+
     DEFAULT_ENTITY_TYPES,
     DEFAULT_MAX_ASYNC,
 )
 from easy_knowledge_retriever.llm.prompts import PROMPTS
 from easy_knowledge_retriever.llm.utils import use_llm_func_with_cache, pack_user_ass_to_openai_messages
-from easy_knowledge_retriever.kg.base import BaseKVStorage, TextChunkSchema
+from easy_knowledge_retriever.kg.kv_storage.base import BaseKVStorage
+from easy_knowledge_retriever.kg.base import TextChunkSchema
 from easy_knowledge_retriever.kg.exceptions import PipelineCancelledException
 
 def _truncate_entity_identifier(
@@ -432,7 +433,7 @@ async def extract_entities(
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
-    language = global_config.get("language", DEFAULT_SUMMARY_LANGUAGE)
+    language = global_config.get("language", "English")
     entity_types = global_config.get("entity_types", DEFAULT_ENTITY_TYPES)
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])

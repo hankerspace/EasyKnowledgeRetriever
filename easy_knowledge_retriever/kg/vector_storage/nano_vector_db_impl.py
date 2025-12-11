@@ -11,11 +11,11 @@ from easy_knowledge_retriever.utils.logger import logger
 from easy_knowledge_retriever.utils.hashing import compute_mdhash_id
 
 from .base import BaseVectorStorage
-from .shared_memory import (
+from ..shared_memory import (
     get_update_flag,
     set_all_update_flags,
 )
-from .concurrency import (
+from ..concurrency import (
     get_namespace_lock,
     get_data_init_lock,
 )

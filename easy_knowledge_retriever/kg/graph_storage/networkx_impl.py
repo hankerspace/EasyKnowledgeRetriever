@@ -3,15 +3,15 @@ import os
 from dataclasses import dataclass
 from typing import final
 
-from .types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
+from ..types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 from easy_knowledge_retriever.utils.logger import logger
 from .base import BaseGraphStorage
 import networkx as nx
-from .shared_memory import (
+from ..shared_memory import (
     get_update_flag,
     set_all_update_flags,
 )
-from .concurrency import get_namespace_lock
+from ..concurrency import get_namespace_lock
 from easy_knowledge_retriever.constants import DEFAULT_MAX_GRAPH_NODES
 
 
