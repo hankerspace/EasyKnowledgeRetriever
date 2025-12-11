@@ -32,10 +32,10 @@ class DummyLLMService(BaseLLMService):
 
 # Old functions removed
 
-from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
-from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
-from easy_knowledge_retriever.kg.networkx_impl import NetworkXStorage
-from easy_knowledge_retriever.kg.json_doc_status_impl import JsonDocStatusStorage
+from easy_knowledge_retriever.kg.kv_storage.json_kv_impl import JsonKVStorage
+from easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl import NanoVectorDBStorage
+from easy_knowledge_retriever.kg.graph_storage.networkx_impl import NetworkXStorage
+from easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl import JsonDocStatusStorage
 
 
 async def main():
@@ -63,10 +63,10 @@ async def main():
         working_dir=working_dir,
         llm_service=llm_service,
         embedding_service=embedding_service,
-        kv_storage=JsonKVStorage(),
-        vector_storage=NanoVectorDBStorage(cosine_better_than_threshold=0.2),
-        graph_storage=NetworkXStorage(),
-        doc_status_storage=JsonDocStatusStorage(),
+        kv_storage=JsonKVStorage(working_dir=working_dir),
+        vector_storage=NanoVectorDBStorage(working_dir=working_dir, cosine_better_than_threshold=0.2),
+        graph_storage=NetworkXStorage(working_dir=working_dir),
+        doc_status_storage=JsonDocStatusStorage(working_dir=working_dir),
     )
 
     await rag.initialize_storages()

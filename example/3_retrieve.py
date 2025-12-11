@@ -5,13 +5,14 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from easy_knowledge_retriever import EasyKnowledgeRetriever, QueryParam
+from easy_knowledge_retriever.retrieval.mix import MixRetrieval
 from easy_knowledge_retriever.llm.service import OpenAILLMService, OpenAIEmbeddingService
 
 
-from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
-from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
-from easy_knowledge_retriever.kg.networkx_impl import NetworkXStorage
-from easy_knowledge_retriever.kg.json_doc_status_impl import JsonDocStatusStorage
+from easy_knowledge_retriever.kg.kv_storage.json_kv_impl import JsonKVStorage
+from easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl import NanoVectorDBStorage
+from easy_knowledge_retriever.kg.graph_storage.networkx_impl import NetworkXStorage
+from easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl import JsonDocStatusStorage
 
 
 async def main():
@@ -57,12 +58,12 @@ async def main():
         working_dir=working_dir,
         llm_service=llm_service,
         embedding_service=embedding_service,
-        kv_storage=JsonKVStorage(),
-        vector_storage=NanoVectorDBStorage(cosine_better_than_threshold=0.2),
-        graph_storage=NetworkXStorage(),
+        kv_storage=JsonKVStorage(working_dir=working_dir),
+        vector_storage=NanoVectorDBStorage(working_dir=working_dir, cosine_better_than_threshold=0.2),
+        graph_storage=NetworkXStorage(working_dir=working_dir),
         # For Neo4j:
         # graph_storage=Neo4jStorage(uri="bolt://...", ...),
-        doc_status_storage=JsonDocStatusStorage(),
+        doc_status_storage=JsonDocStatusStorage(working_dir=working_dir),
     )
 
     await rag.initialize_storages()
@@ -76,10 +77,13 @@ async def main():
 
         print(f"\nQuerying: '{query_text}'")
         
-        # Use hybrid search mode for better results
-        param = QueryParam(mode="mix",only_need_prompt=False )
+        # Use Mix retrieval strategy
+        # param = QueryParam(mode="mix",only_need_prompt=False )
+        retrieval = MixRetrieval()
         
-        result = await rag.aquery(query_text, param=param)
+        # We can still pass param for generation settings if needed, or rely on defaults
+        # But aquery uses retrieval for retrieval strategy.
+        result = await rag.aquery(query_text, retrieval=retrieval)
         print("\nResult:")
         print(result)
         
