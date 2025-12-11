@@ -73,5 +73,5 @@ See the complete catalog of services, implementations, options, and environment 
 
 ## Links
 
-- Source code on GitHub: https://github.com/hankerspace/EasyKnowledgeRetrieval
+- Source code on GitHub: https://github.com/hankerspace/EasyKnowledgeRetriever
 - License: CC BY-NC-SA 4.0

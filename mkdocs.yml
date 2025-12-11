@@ -1,8 +1,8 @@
 site_name: Easy Knowledge Retriever
 site_description: Powerful RAG + Knowledge Graph library for Python
-site_url: https://hankerspace.github.io/EasyKnowledgeRetrieval/
-repo_name: EasyKnowledgeRetrieval
-repo_url: https://github.com/hankerspace/EasyKnowledgeRetrieval
+site_url: https://hankerspace.github.io/EasyKnowledgeRetriever/
+repo_name: EasyKnowledgeRetriever
+repo_url: https://github.com/hankerspace/EasyKnowledgeRetriever
 
 theme:
   name: material
@@ -36,4 +36,4 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/hankerspace/EasyKnowledgeRetrieval
+      link: https://github.com/hankerspace/EasyKnowledgeRetriever

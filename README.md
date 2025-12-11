@@ -6,11 +6,11 @@
     <h1>Easy Knowledge Retriever - The easiest RAG lib ever</h1>
 </div>
 
-[![PyPI - Version](https://img.shields.io/pypi/v/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![Python Versions](https://img.shields.io/pypi/pyversions/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://<YOUR_GITHUB_USERNAME>.github.io/EasyKnowledgeRetrieval/)
+[![PyPI - Version](https://img.shields.io/pypi/v/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![Python Versions](https://img.shields.io/pypi/pyversions/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://hankerspace.github.io/EasyKnowledgeRetriever/)
 
 **Easy Knowledge Retriever** is a powerful and flexible library for building Retrieval-Augmented Generation (RAG) systems with integrated Knowledge Graph support. It allows you to easily ingest documents, build a structured knowledge base (combining vector embeddings and graph relations), and perform advanced queries using Large Language Models (LLMs).
 
-Full documentation (GitHub Pages): https://hankerspace.github.io/EasyKnowledgeRetrieval/
+Full documentation (GitHub Pages): https://hankerspace.github.io/EasyKnowledgeRetriever/
 
 ## Features~~~~
 
