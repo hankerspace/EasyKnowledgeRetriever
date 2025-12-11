@@ -1,8 +1,18 @@
-# Easy Knowledge Retriever
+<div align="center">
+<img src="docs/logo.png" alt="EKR Logo" width="400">
+</div>
+
+<div align="center">
+    <h1>Easy Knowledge Retriever - The easiest RAG lib ever</h1>
+</div>
+
+[![PyPI - Version](https://img.shields.io/pypi/v/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![Python Versions](https://img.shields.io/pypi/pyversions/easy-knowledge-retriever.svg)](https://pypi.org/project/easy-knowledge-retriever/) [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/) [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://<YOUR_GITHUB_USERNAME>.github.io/EasyKnowledgeRetrieval/)
 
 **Easy Knowledge Retriever** is a powerful and flexible library for building Retrieval-Augmented Generation (RAG) systems with integrated Knowledge Graph support. It allows you to easily ingest documents, build a structured knowledge base (combining vector embeddings and graph relations), and perform advanced queries using Large Language Models (LLMs).
 
-## Features
+Full documentation (GitHub Pages): https://hankerspace.github.io/EasyKnowledgeRetrieval/
+
+## Features~~~~
 
 - **Hybrid Retrieval**: Combines vector similarity search with knowledge graph exploration for more context-aware answers.
 - **Knowledge Graph Integration**: Automatically extracts entities and relationships from your text documents.
@@ -167,6 +177,12 @@ graph_storage = Neo4jStorage(
 )
 ```
 
+## Service & Configuration Catalog
+
+For a complete, up-to-date list of all services (LLM, Vector/KV/Graph/Doc Status) and their configuration options, see:
+
+- docs/ServiceCatalog.md
+
 ## Development
 
 To set up the project for development:
@@ -181,3 +197,14 @@ To set up the project for development:
 ```bash
 pytest
 ```
+
+## License
+
+This project is licensed under the Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International (CC BY‑NC‑SA 4.0).
+
+- You must give appropriate credit, provide a link to the license, and indicate if changes were made.
+- You may not use the material for commercial purposes.
+- If you remix, transform, or build upon the material, you must distribute your contributions under the same license as the original.
+
+Full legal text: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode  
+Summary (EN): https://creativecommons.org/licenses/by-nc-sa/4.0/
