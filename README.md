@@ -198,6 +198,15 @@ To set up the project for development:
 pytest
 ```
 
+## References
+
+This project draws inspiration and references from the following projects:
+
+- [LightRAG](https://github.com/HKUDS/LightRAG)
+- [RAG-Anything](https://github.com/HKUDS/RAG-Anything)
+- [RagFlow](https://github.com/infiniflow/ragflow)
+- [Rag-Stack](https://github.com/finic-ai/rag-stack)
+
 ## License
 
 This project is licensed under the Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International (CC BY‑NC‑SA 4.0).

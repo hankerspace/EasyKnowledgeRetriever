@@ -26,229 +26,226 @@ EKR is composed of the following service layers:
 
 Each StorageService is a thin factory around a concrete storage implementation (e.g., NanoVectorDBStorage, NetworkXStorage). Implementations are selected by name via an internal registry.
 
-## 2. How Implementations Are Selected
+## 2. LLM Services Configuration
 
-The registry (easy_knowledge_retriever.kg.registry) maps class names to modules:
-- STORAGES: name → module path
-- STORAGE_IMPLEMENTATIONS: valid implementations per storage type
-- STORAGE_ENV_REQUIREMENTS: environment variables required by certain implementations
+Module: `easy_knowledge_retriever.llm.service`
 
-You typically construct a service with either `storage_name` (string) or `storage_cls` (class) and then call `create(namespace=...)` to obtain a storage instance.
+### 2.1 OpenAILLMService
+- **Purpose**: Text generation / summaries / reasoning via an OpenAI‑compatible API.
+- **Parameters**:
 
-Example (Vector storage with NanoVectorDB):
-```python
-from easy_knowledge_retriever.kg.services import VectorStorageService
-from easy_knowledge_retriever.config.global_config import GlobalConfig
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | str | **Required** | Model name (e.g., "gpt-4o") |
+| `base_url` | str | `None` | API base URL (e.g. "https://api.openai.com/v1") |
+| `api_key` | str | `None` | API key |
+| `temperature` | float | `1.0` | Sampling temperature |
+| `max_async` | int | `1` | Max concurrent requests |
+| `timeout` | int | `1_000_000` | Request timeout (ms) |
+| `summary_max_tokens` | int | `1200` | Max tokens in summarization output |
+| `summary_context_size` | int | `12000` | Context window size for summarization |
+| `summary_length_recommended` | int | `600` | Target length for summary |
 
-g = GlobalConfig(working_dir="./rag_storage", workspace="demo")
-vectors = VectorStorageService(
-    global_config=g,
-    storage_name="NanoVectorDBStorage",
-    workspace=g.workspace,
-    cosine_better_than_threshold=0.2,
-)
-vstore = vectors.create(
-    namespace="entities",
-    embedding_func=my_embedding_func,
-    meta_fields={"file_path", "created_at"},
-    embedding_dim=1536,
-)
-```
+### 2.2 OpenAIEmbeddingService
+- **Purpose**: Generate embeddings via an OpenAI‑compatible API.
+- **Parameters**:
 
-## 3. LLM Services
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | str | **Required** | Model name (e.g. "text-embedding-3-small") |
+| `base_url` | str | `None` | API base URL |
+| `api_key` | str | `None` | API key |
+| `embedding_dim` | int | `1536` | Vector dimension |
+| `batch_num` | int | `1` | Batch size for embedding requests |
+| `max_async` | int | `1` | Max concurrent requests |
+| `timeout` | int | `1_000_000` | Request timeout (ms) |
 
-Module: easy_knowledge_retriever.llm.service
+## 3. Storage Implementations Configuration
 
-### 3.1 OpenAILLMService
-- Purpose: Text generation / summaries / reasoning via an OpenAI‑compatible API.
-- Constructor parameters:
-  - model (str): Model name (e.g., "gpt-4o", "gpt-4o-mini").
-  - base_url (str | None): API base URL (OpenAI or compatible gateway).
-  - api_key (str | None): API key.
-  - temperature (float): Default sampling temperature. Default: 1.0.
-  - max_async (int): Max concurrent requests. Default: 1.
-  - timeout (int): Request timeout (ms). Default: 1_000_000.
-  - summary_max_tokens (int): Max tokens in summarization. Default: 1200.
-  - summary_context_size (int): Context window used for summarization. Default: 12000.
-  - summary_length_recommended (int): Target summary length. Default: 600.
+Module: `easy_knowledge_retriever.kg`
 
-Usage:
-```python
-from easy_knowledge_retriever.llm.service import OpenAILLMService
-llm = OpenAILLMService(model="gpt-4o", base_url="https://api.openai.com/v1", api_key="...")
-# inside an async function:
-# text = await llm("Summarize this text ...")
-```
+**Important Note on `working_dir`**: When instantiating storage classes directly (e.g., `JsonKVStorage(working_dir="/data")`), you **MUST** provide the `working_dir` argument if you want data to be persisted in a specific location. If omitted, it defaults to an empty string `""`.
 
-### 3.2 OpenAIEmbeddingService
-- Purpose: Generate embeddings via an OpenAI‑compatible API.
-- Constructor parameters:
-  - model (str)
-  - base_url (str | None)
-  - api_key (str | None)
-  - batch_num (int): Default: 1.
-  - max_async (int): Default: 1.
-  - timeout (int): Default: 1_000_000.
-  - embedding_dim (int): Vector dimension. Default: 1536.
-  - cache_config (dict | None)
+### 3.1 KV Storage (`KVStorageService`)
 
-Usage:
-```python
-from easy_knowledge_retriever.llm.service import OpenAIEmbeddingService
-embed = OpenAIEmbeddingService(model="text-embedding-3-small", base_url="https://api.openai.com/v1", api_key="...")
-# inside an async function:
-# vectors = await embed(["hello", "world"])  # returns np.ndarray
-```
+#### **JsonKVStorage**
+- **Type**: Local File (JSON)
+- **Env Vars**: None
+- **Parameters**:
 
-## 4. Storage Services and Implementations
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `working_dir` | str | `""` | Root directory for data storage |
+| `namespace` | str | `None` | Storage namespace (set by `create()`) |
+| `workspace` | str | `""` | Workspace name (subdirectory) |
+| `embedding_func` | callable | `None` | Not used by KV storage |
 
-Module: easy_knowledge_retriever.kg.services
+#### **PGKVStorage**
+- **Type**: PostgreSQL Database
+- **Env Vars**: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DATABASE`, `POSTGRES_HOST`, `POSTGRES_PORT` (managed by global ClientManager)
+- **Parameters**:
 
-All storage services share base dataclass fields through `Base*Storage` classes, such as:
-- namespace (str)
-- working_dir (str)
-- workspace (str)
-- embedding_func (callable | None)
-Additional fields exist for vector stores (e.g., `embedding_dim`, `cosine_better_than_threshold`, `meta_fields`).
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `db` | PostgreSQLDB | `None` | Helper db instance (auto-initialized if None) |
+| `max_batch_size` | int | `1` | Batch size for ops |
+| `working_dir` | str | `""` | Not used (uses DB) |
+| `workspace` | str | `""` | Workspace name (controls table filtering) |
 
-### 4.1 KV Storage
-Service: `KVStorageService`
+---
 
-Implementations:
-- JsonKVStorage (no special env vars)
-- PGKVStorage (requires Postgres env)
+### 3.2 Vector Storage (`VectorStorageService`)
 
-Constructor (via service.create):
-```python
-kv = KVStorageService(global_config=g, storage_name="JsonKVStorage", workspace=g.workspace)
-kv_store = kv.create(namespace="kv_cache", embedding_func=None)
-```
+#### **NanoVectorDBStorage**
+- **Type**: Local File (NanoVectorDB)
+- **Env Vars**: `NANO_VECTOR_DB_WORKSPACE` (Overwrites `workspace` if set)
+- **Parameters**:
 
-Environment requirements:
-- JsonKVStorage: none
-- PGKVStorage: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `working_dir` | str | `""` | Root directory for data storage |
+| `embedding_dim` | int | `None` | Vector dimension (e.g. 1536) |
+| `cosine_better_than_threshold` | float | `None` | Similarity threshold (typ. 0.2) |
+| `meta_fields` | set | `set()` | Fields to store alongside vectors |
+| `workspace` | str | `""` | Workspace name |
+| `namespace` | str | `None` | Storage namespace |
 
-### 4.2 Vector Storage
-Service: `VectorStorageService`
+#### **MilvusVectorDBStorage**
+- **Type**: Milvus Database
+- **Env Vars**: `MILVUS_WORKSPACE` (Overwrites `workspace` if set)
+- **Parameters**:
 
-Service options:
-- cosine_better_than_threshold (float): default 0.2; can be overridden per `create()`.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `milvus_uri` | str | `None` | Connection URI (e.g. "http://localhost:19530") |
+| `milvus_token` | str | `None` | Auth token |
+| `milvus_user` | str | `None` | Username |
+| `milvus_password` | str | `None` | Password |
+| `milvus_db_name` | str | `"default"` | Database name |
+| `workspace` | str | `""` | Workspace prefix for collections |
+| `embedding_dim` | int | `1536` | Vector dimension |
+| `cosine_better_than_threshold` | float | `0.2` | Similarity threshold |
 
-Implementations:
-- NanoVectorDBStorage (local, lightweight; no special env vars)
-- MilvusVectorDBStorage (requires Milvus settings)
-- PGVectorStorage (requires Postgres settings)
+#### **PGVectorStorage**
+- **Type**: PostgreSQL with pgvector
+- **Env Vars**: Standard Postgres vars (see PGKVStorage)
+- **Parameters**:
 
-Constructor (via service.create):
-```python
-vectors = VectorStorageService(global_config=g, storage_name="NanoVectorDBStorage", workspace=g.workspace, cosine_better_than_threshold=0.2)
-vstore = vectors.create(namespace="entities", embedding_func=embed_func, meta_fields={"file_path", "created_at"}, embedding_dim=1536)
-```
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `db` | PostgreSQLDB | `None` | DB Client |
+| `max_batch_size` | int | `1` | Batch size |
+| `workspace` | str | `""` | Workspace filter |
 
-Implementation‑specific constructor notes:
-- MilvusVectorDBStorage(namespace, embedding_func, meta_fields, working_dir=None, embedding_dim=None, cosine_better_than_threshold=None, workspace=None, milvus_uri=None, milvus_user=None, milvus_password=None, milvus_token=None, milvus_db_name="default")
-  - Honors `MILVUS_WORKSPACE` env var to override `workspace`.
-  - Common meta field `created_at` is always included.
+---
 
-Environment requirements:
-- NanoVectorDBStorage: none
-- MilvusVectorDBStorage: MILVUS_URI, MILVUS_DB_NAME (plus auth if applicable)
-- PGVectorStorage: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE
+### 3.3 Graph Storage (`GraphStorageService`)
 
-### 4.3 Graph Storage
-Service: `GraphStorageService`
+#### **NetworkXStorage**
+- **Type**: Local File (GraphML)
+- **Env Vars**: None
+- **Parameters**:
 
-Implementations:
-- NetworkXStorage (JSON on disk; no special env)
-- Neo4JStorage (Neo4j driver)
-- PGGraphStorage (Postgres + AGE extension)
-- AGEStorage (Apache AGE specific)
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `working_dir` | str | `""` | Root directory for GraphML files |
+| `max_graph_nodes` | int | `DEFAULT` | Max nodes returned in BFS searches (default ~1000) |
+| `workspace` | str | `""` | Workspace name |
 
-Selected constructor highlights:
-- Neo4JStorage(namespace, embedding_func, working_dir=None, workspace=None, neo4j_uri=None, neo4j_username=None, neo4j_password=None, neo4j_connection_pool_size=100, neo4j_connection_timeout=30.0, neo4j_connection_acquisition_timeout=30.0, neo4j_max_transaction_retry_time=30.0, neo4j_max_connection_lifetime=300.0, neo4j_liveness_check_timeout=30.0, neo4j_keep_alive=True, neo4j_database=None, max_graph_nodes=DEFAULT_MAX_GRAPH_NODES)
+#### **Neo4JStorage**
+- **Type**: Neo4j Database
+- **Env Vars**: `NEO4J_WORKSPACE` (Overwrites `workspace` if set)
+- **Parameters**:
 
-Environment requirements:
-- NetworkXStorage: none
-- Neo4JStorage: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
-- PGGraphStorage: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE
-- AGEStorage: AGE_POSTGRES_DB, AGE_POSTGRES_USER, AGE_POSTGRES_PASSWORD
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `neo4j_uri` | str | `None` | Bolt URI (e.g. "bolt://localhost:7687") |
+| `neo4j_username` | str | `None` | Username |
+| `neo4j_password` | str | `None` | Password |
+| `neo4j_database` | str | `None` | Database name |
+| `neo4j_connection_pool_size` | int | `100` | Pool size |
+| `max_graph_nodes` | int | `DEFAULT` | Max nodes in search |
+| `workspace` | str | `"base"` | Workspace name |
 
-### 4.4 Document Status Storage
-Service: `DocStatusStorageService`
+#### **PGGraphStorage**
+- **Type**: PostgreSQL with Apache AGE
+- **Env Vars**: Standard Postgres vars
+- **Parameters**:
 
-Implementations:
-- JsonDocStatusStorage (no special env)
-- PGDocStatusStorage (Postgres)
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `db` | PostgreSQLDB | `None` | DB Client |
+| `max_graph_nodes` | int | `DEFAULT` | Max nodes in search |
+| `workspace` | str | `""` | Workspace name (determines graph name) |
 
-Environment requirements:
-- JsonDocStatusStorage: none
-- PGDocStatusStorage: (Postgres standard vars; see PG entries above)
+---
 
-## 5. Global Configuration (GlobalConfig)
+### 3.4 DocStatus Storage (`DocStatusStorageService`)
 
-Module: easy_knowledge_retriever.config.global_config
+#### **JsonDocStatusStorage**
+- **Type**: Local File (JSON)
+- **Env Vars**: None
+- **Parameters**:
 
-The `GlobalConfig` dataclass centralizes defaults used across ingestion and querying. Key fields and defaults:
-- working_dir: "./rag_storage"
-- workspace: ""
-- top_k: 40
-- chunk_top_k: 20
-- max_entity_tokens: 6000
-- max_relation_tokens: 8000
-- max_total_tokens: 30000
-- cosine_threshold: 0.2
-- related_chunk_number: 5
-- kg_chunk_pick_method: "VECTOR"
-- entity_extract_max_gleaning: 1
-- force_llm_summary_on_merge: 8
-- chunk_token_size: 1200
-- chunk_overlap_token_size: 100
-- tiktoken_model_name: "gpt-4o-mini"
-- max_parallel_insert: 1
-- max_source_ids_per_entity: 300
-- max_source_ids_per_relation: 300
-- source_ids_limit_method: "FIFO" (KEEP | FIFO)
-- max_file_paths: 100
-- file_path_more_placeholder: "truncated"
-- language: "French" (default processing language)
-- entity_types: ["Person", "Creature", "Organization", "Location", "Event", "Concept", "Method", "Content", "Data", "Artifact", "NaturalObject"]
-- enable_llm_cache: True
-- enable_llm_cache_for_entity_extract: True
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `working_dir` | str | `""` | Root directory |
+| `workspace` | str | `""` | Workspace name |
 
-Tip: `GlobalConfig.to_dict()` converts the config into a plain dict for services.
+#### **PGDocStatusStorage**
+- **Type**: PostgreSQL
+- **Env Vars**: Standard Postgres vars
+- **Parameters**:
 
-## 6. Putting It All Together
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `db` | PostgreSQLDB | `None` | DB Client |
+| `workspace` | str | `""` | Workspace filter |
 
-End‑to‑end example using JSON/Nano/NetworkX (fully local):
+## 4. End-to-End Example
+
 ```python
 from easy_knowledge_retriever import EasyKnowledgeRetriever
 from easy_knowledge_retriever.llm.service import OpenAILLMService, OpenAIEmbeddingService
-from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
-from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
-from easy_knowledge_retriever.kg.networkx_impl import NetworkXStorage
-from easy_knowledge_retriever.kg.json_doc_status_impl import JsonDocStatusStorage
-from easy_knowledge_retriever.config.global_config import GlobalConfig
+from easy_knowledge_retriever.kg.kv_storage.json_kv_impl import JsonKVStorage
+from easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl import NanoVectorDBStorage
+from easy_knowledge_retriever.kg.graph_storage.networkx_impl import NetworkXStorage
+from easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl import JsonDocStatusStorage
 
-g = GlobalConfig(working_dir="./rag_data", workspace="demo")
+# 1. Setup Services
+llm_service = OpenAILLMService(
+    model="gpt-4o", 
+    base_url="https://api.openai.com/v1", 
+    api_key="sk-..."
+)
+embedding_service = OpenAIEmbeddingService(
+    model="text-embedding-3-small", 
+    base_url="https://api.openai.com/v1", 
+    api_key="sk-...", 
+    embedding_dim=1536
+)
 
-llm_service = OpenAILLMService(model="gpt-4o", base_url="https://api.openai.com/v1", api_key="...")
-embedding_service = OpenAIEmbeddingService(model="text-embedding-3-small", base_url="https://api.openai.com/v1", api_key="...", embedding_dim=1536)
-
+# 2. Initialize Retriever with Explicit Storage Configuration
+# Note: Explicit working_dir is required for local storages
 rag = EasyKnowledgeRetriever(
-    working_dir=g.working_dir,
+    working_dir="./rag_data",
     llm_service=llm_service,
     embedding_service=embedding_service,
-    kv_storage=JsonKVStorage(),
-    vector_storage=NanoVectorDBStorage(cosine_better_than_threshold=0.2),
-    graph_storage=NetworkXStorage(),
-    doc_status_storage=JsonDocStatusStorage(),
+    
+    # KV Storage
+    kv_storage=JsonKVStorage(working_dir="./rag_data"),
+    
+    # Vector Storage
+    vector_storage=NanoVectorDBStorage(
+        working_dir="./rag_data", 
+        embedding_dim=1536,
+        cosine_better_than_threshold=0.2
+    ),
+    
+    # Graph Storage
+    graph_storage=NetworkXStorage(working_dir="./rag_data"),
+    
+    # Doc Status Storage
+    doc_status_storage=JsonDocStatusStorage(working_dir="./rag_data"),
 )
 ```
-
-Switching to Milvus/Neo4j/Postgres only changes the storage classes and their connection options or environment variables as listed above.
-
-## 7. Troubleshooting
-
-- Unknown storage name: ensure the `storage_name` matches one of the registry keys (see Section 4). The service will raise `ValueError` if the name is not registered.
-- Missing environment variables: set the required variables listed for your implementation before starting your app/tests.
-- Vector dimension mismatches: set `embedding_dim` in `VectorStorageService.create(...)` to match your embedding model (e.g., 1536 for `text-embedding-3-small`).
