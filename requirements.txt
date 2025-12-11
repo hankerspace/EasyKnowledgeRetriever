@@ -20,6 +20,9 @@ pypdf
 mineru
 doclayout_yolo
 
+# Eval
+ragas
+datasets
 
 # Mineru & DocLayout-YOLO Dependencies
 ultralytics
@@ -31,3 +34,6 @@ omegaconf
 # Other
 pypinyin
 dill
+
+langchain-openai
+json_repair

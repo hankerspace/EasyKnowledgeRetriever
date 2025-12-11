@@ -198,6 +198,10 @@ To set up the project for development:
 pytest
 ```
 
+## RAGAS Evaluation
+
+The provided evaluation example yields an average `answer_relevancy` of 0.78 with Gemini 2.0 Flash Lite, and 0.81 with Gemini 2.5 Flash Lite. This indicates a strong correlation with the model used for knowledge graph generation and retrieval.
+
 ## References
 
 This project draws inspiration and references from the following projects:
