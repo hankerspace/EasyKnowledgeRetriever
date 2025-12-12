@@ -4,6 +4,7 @@ from .kg_global import GlobalRetrieval
 from .hybrid import HybridRetrieval
 from .mix import MixRetrieval
 from .naive import NaiveRetrieval
+from .hybrid_mix import HybridMixRetrieval
 from .bypass import BypassRetrieval
 
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "GlobalRetrieval",
     "HybridRetrieval",
     "MixRetrieval",
+    "HybridMixRetrieval",
     "NaiveRetrieval",
     "BypassRetrieval",
 ]
