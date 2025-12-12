@@ -474,9 +474,6 @@ async def _rebuild_single_entity(
 
     # Apply MAX_FILE_PATHS limit
     limit_method = source_ids_limit_method
-    file_path_placeholder = file_path_more_placeholder
-    limit_method = source_ids_limit_method
-
     original_count = len(file_paths_list)
     if original_count > max_file_paths:
         if limit_method == SOURCE_IDS_LIMIT_METHOD_FIFO:
@@ -487,7 +484,7 @@ async def _rebuild_single_entity(
             file_paths_list = file_paths_list[:max_file_paths]
 
         file_paths_list.append(
-            f"...{file_path_placeholder}...({limit_method} {max_file_paths}/{original_count})"
+            f"...{file_path_more_placeholder}...({limit_method} {max_file_paths}/{original_count})"
         )
         logger.info(
             f"Limited `{entity_name}`: file_path {original_count} -> {max_file_paths} ({limit_method})"
@@ -652,7 +649,7 @@ async def _rebuild_single_relationship(
             file_paths_list = file_paths_list[:max_file_paths]
 
         file_paths_list.append(
-            f"...{file_path_placeholder}...({limit_method} {max_file_paths}/{original_count})"
+            f"...{file_path_more_placeholder}...({limit_method} {max_file_paths}/{original_count})"
         )
         logger.info(
             f"Limited `{src}`~`{tgt}`: file_path {original_count} -> {max_file_paths} ({limit_method})"
@@ -997,7 +994,7 @@ async def _merge_nodes_then_upsert(
 
     # Collect from already_file_paths, excluding placeholder
     for fp in already_file_paths:
-        if fp and fp.startswith(f"...{file_path_placeholder}"):  # Skip placeholders
+        if fp and fp.startswith(f"...{file_path_more_placeholder}"):  # Skip placeholders
             has_placeholder = True
             continue
         if fp and fp not in seen_paths:
@@ -1021,11 +1018,11 @@ async def _merge_nodes_then_upsert(
         if limit_method == SOURCE_IDS_LIMIT_METHOD_FIFO:
             # FIFO: keep tail (newest), discard head
             file_paths_list = file_paths_list[-max_file_paths:]
-            file_paths_list.append(f"...{file_path_placeholder}...(FIFO)")
+            file_paths_list.append(f"...{file_path_more_placeholder}...(FIFO)")
         else:
             # KEEP: keep head (earliest), discard tail
             file_paths_list = file_paths_list[:max_file_paths]
-            file_paths_list.append(f"...{file_path_placeholder}...(KEEP Old)")
+            file_paths_list.append(f"...{file_path_more_placeholder}...(KEEP Old)")
 
         logger.info(
             f"Limited `{entity_name}`: file_path {original_count_str} -> {max_file_paths} ({limit_method})"
@@ -1324,7 +1321,7 @@ async def _merge_edges_then_upsert(
     # Collect from already_file_paths, excluding placeholder
     for fp in already_file_paths:
         # Check if this is a placeholder record
-        if fp and fp.startswith(f"...{file_path_placeholder}"):  # Skip placeholders
+        if fp and fp.startswith(f"...{file_path_more_placeholder}"):  # Skip placeholders
             has_placeholder = True
             continue
         if fp and fp not in seen_paths:
@@ -1348,11 +1345,11 @@ async def _merge_edges_then_upsert(
         if limit_method == SOURCE_IDS_LIMIT_METHOD_FIFO:
             # FIFO: keep tail (newest), discard head
             file_paths_list = file_paths_list[-max_file_paths:]
-            file_paths_list.append(f"...{file_path_placeholder}...(FIFO)")
+            file_paths_list.append(f"...{file_path_more_placeholder}...(FIFO)")
         else:
             # KEEP: keep head (earliest), discard tail
             file_paths_list = file_paths_list[:max_file_paths]
-            file_paths_list.append(f"...{file_path_placeholder}...(KEEP Old)")
+            file_paths_list.append(f"...{file_path_more_placeholder}...(KEEP Old)")
 
         logger.info(
             f"Limited `{src_id}`~`{tgt_id}`: file_path {original_count_str} -> {max_file_paths} ({limit_method})"
