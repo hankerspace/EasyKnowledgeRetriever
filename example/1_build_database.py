@@ -51,14 +51,16 @@ async def main():
         api_key=embedding_api_key,
         base_url=embedding_base_url,
         model=embedding_model,
-        embedding_dim=embedding_dim
+        embedding_dim=embedding_dim,
+        timeout=300
     )
 
 
     llm_service = OpenAILLMService(
         model=llm_model,
         api_key=llm_api_key,
-        base_url=llm_base_url
+        base_url=llm_base_url,
+        timeout=300
     )
 
     # Initialize EasyKnowledgeRetriever with JsonKVStorage explicitly
@@ -70,6 +72,7 @@ async def main():
         vector_storage=NanoVectorDBStorage(working_dir=working_dir),
         graph_storage=NetworkXStorage(working_dir=working_dir),
         doc_status_storage=JsonDocStatusStorage(working_dir=working_dir),
+        language="English",  # Example of setting a specific language
     )
 
     await rag.initialize_storages()

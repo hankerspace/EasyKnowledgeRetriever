@@ -53,12 +53,6 @@ async def main():
     embedding_service = DummyEmbeddingService(embedding_dim)
     llm_service = DummyLLMService()
 
-    embedding_func = EmbeddingFunc(
-        embedding_dim=embedding_dim,
-        func=embedding_service,
-        send_dimensions=True
-    )
-
     rag = EasyKnowledgeRetriever(
         working_dir=working_dir,
         llm_service=llm_service,

@@ -59,21 +59,17 @@ async def main():
         llm_service=llm_service,
         embedding_service=embedding_service,
         kv_storage=JsonKVStorage(working_dir=working_dir),
-        vector_storage=NanoVectorDBStorage(working_dir=working_dir, cosine_better_than_threshold=0.2),
+        vector_storage=NanoVectorDBStorage(working_dir=working_dir),
         graph_storage=NetworkXStorage(working_dir=working_dir),
-        # For Neo4j:
-        # graph_storage=Neo4jStorage(uri="bolt://...", ...),
         doc_status_storage=JsonDocStatusStorage(working_dir=working_dir),
+        language="English",  # Example of setting a specific language
     )
 
     await rag.initialize_storages()
     
     try:
         # Perform the query using existing data
-        # Note: We rely on data having been inserted by build_index.py
-        # If 'que peux tu me dire sur les feux de foret' query is intended, 
-        # ensure build_index.py put something relevant or just test general retrieval.
-        query_text = "Crée un QCM de 20 questions avec les justifications concernant la prise en charge d'un accouchement."
+        query_text = "What is SARL? How can it be used in real world applications?"
 
         print(f"\nQuerying: '{query_text}'")
         
