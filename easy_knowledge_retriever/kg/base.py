@@ -102,6 +102,11 @@ class QueryParam:
     containing citation information for the retrieved content.
     """
 
+    query_decomposition: bool = False
+    """If True, enables query decomposition for complex queries.
+    The query will be split into sub-queries, retrieved separately, and then results merged.
+    """
+
 
 @dataclass
 class StorageNameSpace(ABC):

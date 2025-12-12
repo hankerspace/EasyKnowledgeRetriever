@@ -1712,3 +1712,89 @@ async def naive_query(
         return QueryResult(
             response_iterator=response, raw_data=raw_data, is_streaming=True
         )
+
+
+async def decompose_query(
+    query: str,
+    llm_model_func: callable,
+) -> list[str]:
+    """
+    Decompose a complex query into simpler sub-queries using LLM.
+    """
+    prompt = PROMPTS["query_decomposition"].format(query=query)
+    
+    response = await llm_model_func(
+        prompt, 
+        system_prompt=None,
+        history_messages=[],
+    )
+    
+    response = remove_think_tags(response)
+    
+    # Try parsing as JSON list
+    try:
+        parsed = json_repair.loads(response)
+        if isinstance(parsed, list):
+            # Ensure all elements are strings
+            return [str(item) for item in parsed if isinstance(item, (str, int, float))]
+    except Exception:
+        pass
+    
+    # Fallback to line splitting
+    sub_queries = []
+    if isinstance(response, str):
+        lines = response.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            # Remove numbering like "1. " or "- "
+            if line.startswith(tuple("0123456789")):
+                line = line.lstrip("0123456789. ")
+            elif line.startswith("- "):
+                line = line[2:]
+            elif line.startswith("* "):
+                line = line[2:]
+            
+            line = line.strip().strip('"').strip("'")
+            # Filter out non-query lines like "Here is the list:" or "```json" or "```"
+            if line and not line.startswith("```") and not line.endswith(":") and len(line) > 5:
+                sub_queries.append(line)
+                
+    if not sub_queries:
+        return [query]
+        
+    return sub_queries
+
+
+def merge_query_results(results: list[QueryContextResult]) -> QueryContextResult:
+    """
+    Merge multiple QueryContextResult objects into one.
+    """
+    if not results:
+        return QueryContextResult(context="", raw_data={})
+        
+    merged_context = ""
+    merged_raw_data = {
+        "local_entities": [],
+        "local_relations": [],
+        "global_entities": [],
+        "global_relations": [],
+        "vector_chunks": [],
+        "chunk_tracking": {},
+        "metadata": {}
+    }
+    
+    for i, result in enumerate(results):
+        if result.context:
+            merged_context += f"\n--- Context for Sub-query {i+1} ---\n{result.context}\n"
+        
+        # Merge raw data
+        if result.raw_data:
+            for key in ["local_entities", "local_relations", "global_entities", "global_relations", "vector_chunks"]:
+                if key in result.raw_data and isinstance(result.raw_data[key], list):
+                    merged_raw_data[key].extend(result.raw_data[key])
+            
+            # Merge chunk tracking
+            if "chunk_tracking" in result.raw_data:
+                merged_raw_data["chunk_tracking"].update(result.raw_data["chunk_tracking"])
+
+    return QueryContextResult(context=merged_context, raw_data=merged_raw_data)

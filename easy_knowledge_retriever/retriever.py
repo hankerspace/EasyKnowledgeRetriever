@@ -113,6 +113,8 @@ from easy_knowledge_retriever.operations.graph_ops import (
 from easy_knowledge_retriever.retrieval.query_processing import (
     kg_query,
     naive_query,
+    decompose_query,
+    merge_query_results,
 )
 from easy_knowledge_retriever.constants import GRAPH_FIELD_SEP
 from easy_knowledge_retriever.utils.tokenizer import Tokenizer, TiktokenTokenizer
@@ -2477,6 +2479,24 @@ class EasyKnowledgeRetriever:
         Returns:
             QueryContextResult: Context data.
         """
+        if getattr(retrieval, "query_decomposition", False):
+            try:
+                sub_queries = await decompose_query(query, self.llm_model_func)
+                if len(sub_queries) > 1:
+                    logger.info(f"Query decomposition active. Sub-queries: {sub_queries}")
+                    results = []
+                    for sub_q in sub_queries:
+                        # Recursively call retrieve with the sub-query
+                        # We temporarily disable decomposition to avoid infinite loop if logic was different,
+                        # but here we call retrieval.retrieve directly so it's fine unless retrieval.retrieve calls back self.retrieve.
+                        # retrieval.retrieve uses self (rag) but usually calls self.query or internal methods.
+                        # Standard implementations call _common_kg_retrieve or search directly.
+                        results.append(await retrieval.retrieve(sub_q, self))
+                    
+                    return merge_query_results(results)
+            except Exception as e:
+                logger.error(f"Error during query decomposition: {e}. Falling back to standard retrieval.")
+        
         return await retrieval.retrieve(query, self)
 
     def query(

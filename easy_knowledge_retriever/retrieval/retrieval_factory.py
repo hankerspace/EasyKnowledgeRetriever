@@ -12,6 +12,7 @@ class RetrievalFactory:
         from easy_knowledge_retriever.retrieval.kg_global import GlobalRetrieval
         from easy_knowledge_retriever.retrieval.hybrid import HybridRetrieval
         from easy_knowledge_retriever.retrieval.mix import MixRetrieval
+        from easy_knowledge_retriever.retrieval.hybrid_mix import HybridMixRetrieval
         from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval
 
         # Common params
@@ -19,6 +20,7 @@ class RetrievalFactory:
             "max_total_tokens": param.max_total_tokens,
             "conversation_history": param.conversation_history,
             "reranker_service": reranker_service,
+            "query_decomposition": param.query_decomposition,
         }
 
         if param.mode == "local":
@@ -51,6 +53,14 @@ class RetrievalFactory:
                 chunk_top_k=param.chunk_top_k,
                 max_entity_tokens=param.max_entity_tokens,
                 max_relation_tokens=param.max_relation_tokens,
+                hl_keywords=param.hl_keywords,
+                ll_keywords=param.ll_keywords,
+            )
+        elif param.mode == "hybrid_mix":
+             return HybridMixRetrieval(
+                **base_params,
+                top_k=param.top_k,
+                chunk_top_k=param.chunk_top_k,
                 hl_keywords=param.hl_keywords,
                 ll_keywords=param.ll_keywords,
             )

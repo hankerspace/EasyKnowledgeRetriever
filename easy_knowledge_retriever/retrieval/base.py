@@ -22,6 +22,7 @@ class BaseRetrieval(ABC):
     max_total_tokens: int = 2000
     conversation_history: list[dict[str, str]] = field(default_factory=list)
     reranker_service: BaseRerankerService | None = None
+    query_decomposition: bool = False
 
     @abstractmethod
     def _create_query_param(self) -> QueryParam:

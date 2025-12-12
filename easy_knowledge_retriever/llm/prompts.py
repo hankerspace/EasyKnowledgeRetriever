@@ -760,3 +760,19 @@ PROMPTS["QUERY_GENERIC_ANALYST_SYSTEM"] = (
 PROMPTS["QUERY_ENHANCEMENT_SUFFIX"] = (
     "\n\nPlease provide a comprehensive answer based on the user query and the provided multimodal content information."
 )
+
+PROMPTS["query_decomposition"] = """---Role---
+You are an expert at query decomposition. Your task is to analyze if a given query is complex and should be decomposed into sub-queries.
+
+---Task---
+1. Analyze the input query.
+2. Determine if it contains multiple distinct questions or comparison tasks that require separate information retrieval.
+3. If yes, break it down into simple, independent sub-queries.
+4. If no (it's a simple query), return the original query as is.
+5. Return the result strictly as a JSON list of strings, e.g. ["sub-query 1", "sub-query 2"].
+
+---Input---
+Query: {query}
+
+---Output---
+"""
