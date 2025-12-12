@@ -214,6 +214,7 @@ class Chunk:
     chunk_id: str
     reference_id: str = ""
     page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 @dataclass
 class Reference:

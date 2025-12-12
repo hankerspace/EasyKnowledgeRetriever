@@ -784,6 +784,36 @@ async def _merge_all_chunks(
             query_embedding=query_embedding,
         )
 
+    # Enrich vector_chunks with metadata from text_chunks_db if available
+    if vector_chunks and text_chunks_db:
+        chunk_ids_to_fetch = []
+        chunk_map = {}
+        for vc in vector_chunks:
+            cid = vc.get("chunk_id") or vc.get("id")
+            if cid:
+                chunk_ids_to_fetch.append(cid)
+                chunk_map[cid] = vc
+        
+        if chunk_ids_to_fetch:
+            try:
+                full_chunks = await text_chunks_db.get_by_ids(chunk_ids_to_fetch)
+                for full_chunk in full_chunks:
+                    if full_chunk:
+                        cid = full_chunk.get("_id")
+                        if cid and cid in chunk_map:
+                            target_vc = chunk_map[cid]
+                            # Update with page info
+                            if "page_start" in full_chunk:
+                                target_vc["page_start"] = full_chunk["page_start"]
+
+                            if "page_end" in full_chunk:
+                                target_vc["page_end"] = full_chunk["page_end"]
+                            # Update file path if missing
+                            if target_vc.get("file_path", "unknown_source") == "unknown_source" and "file_path" in full_chunk:
+                                target_vc["file_path"] = full_chunk["file_path"]
+            except Exception as e:
+                logger.warning(f"Failed to enrich vector chunks from KV store: {e}")
+
     # Round-robin merge chunks from different sources with deduplication
     merged_chunks = []
     seen_chunk_ids = set()
@@ -1127,10 +1157,10 @@ async def _build_query_context(
     }
 
     if not final_entities and not final_relations:
-        if query_param.mode != "mix":
+        if query_param.mode not in ["mix", "hybrid_mix"]:
             return None
         else:
-            if not chunk_tracking:
+            if not chunk_tracking and not vector_chunks:
                 return None
 
     # Stage 2: Apply token truncation
