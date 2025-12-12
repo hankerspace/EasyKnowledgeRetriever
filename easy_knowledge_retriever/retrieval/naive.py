@@ -8,8 +8,10 @@ from easy_knowledge_retriever.kg.base import (
 )
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
-from easy_knowledge_retriever.retrieval.base import BaseRetrieval, _common_kg_retrieve
+from easy_knowledge_retriever.retrieval.base import BaseRetrieval
 from easy_knowledge_retriever.retrieval.ops import get_vector_context
+from easy_knowledge_retriever.retrieval.query_processing import _build_context_str
+from easy_knowledge_retriever.llm.prompts import PROMPTS
 
 if TYPE_CHECKING:
     from easy_knowledge_retriever.retriever import EasyKnowledgeRetriever
@@ -31,7 +33,34 @@ class NaiveRetrieval(BaseRetrieval):
         )
 
     async def retrieve(self, query: str, rag: "EasyKnowledgeRetriever") -> QueryContextResult:
-        return await _common_kg_retrieve(self, query, rag)
+        query_param = self._create_query_param()
+
+        # Execute Search directly without KG access
+        search_result = await self.search(
+            query=query,
+            knowledge_graph_inst=rag.chunk_entity_relation_graph,
+            entities_vdb=rag.entities_vdb,
+            relationships_vdb=rag.relationships_vdb,
+            chunks_vdb=rag.chunks_vdb,
+        )
+        
+        vector_chunks = search_result.get("vector_chunks", [])
+        chunk_tracking = search_result.get("chunk_tracking", {})
+
+        # Build context string directly, skipping keyword extraction and KG context building
+        context, final_data = await _build_context_str(
+            entities_context=[],
+            relations_context=[],
+            merged_chunks=vector_chunks,
+            query=query,
+            query_param=query_param,
+            tokenizer=rag.tokenizer,
+            max_total_tokens=rag.max_total_tokens,
+            system_prompt_template=PROMPTS["rag_response"],
+            chunk_tracking=chunk_tracking
+        )
+
+        return QueryContextResult(context=context, raw_data=final_data)
 
     async def search(
         self,

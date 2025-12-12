@@ -615,6 +615,8 @@ class EasyKnowledgeRetriever:
                     hashing_kv=hashing_kv,
                 )
             )
+            # Attach the wrapped function to the service instance so it's accessible downstream
+            self.llm_service.llm_model_func = self.llm_model_func
             logger.debug(f"Initialized llm_model_func from service with max_async={self.llm_service.max_async}")
 
         self._storages_status = StoragesStatus.CREATED
@@ -1151,6 +1153,13 @@ class EasyKnowledgeRetriever:
             if parsed_data is None:
                 print(f"Parsing document: {file_path}...")
                 parsed_data = parser.parse(file_path, start_page=start_page, end_page=end_page)
+
+            # Calculate a stable ID based on the original text content (before image summarization)
+            # This ensures that even if image summaries change (LLM non-determinism),
+            # the document ID remains the same, preventing duplicates.
+            doc_content_raw = parsed_data.get("content", "")
+            cleaned_content = sanitize_text_for_encoding(doc_content_raw)
+            doc_id = compute_mdhash_id(cleaned_content, prefix="doc-")
             
             # --- Multimodal Processing (Image Summarization) ---
             if self.llm_model_func:
@@ -1175,7 +1184,7 @@ class EasyKnowledgeRetriever:
                 # Here we pass self.llm_model_func which is async and accepts kwargs.
                 
                 print("Processing images with VLM...")
-                summarizer = ImageSummarizer(self.llm_model_func)
+                summarizer = ImageSummarizer(self.llm_model_func, llm_response_cache=self.llm_response_cache)
                 
                 # Iterate over pages to associate images with page numbers
                 if "pages" in parsed_data:
@@ -1213,7 +1222,7 @@ class EasyKnowledgeRetriever:
             print(f"Indexing document content...")
             # ingest into RAG
             # We wrap input in list as ainsert expects a list of documents
-            await self.ainsert(input=[parsed_data], file_paths=[file_path])
+            await self.ainsert(input=[parsed_data], ids=[doc_id], file_paths=[file_path])
             
             return parsed_data
         except Exception as e:
