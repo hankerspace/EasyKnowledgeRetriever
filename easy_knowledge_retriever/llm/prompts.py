@@ -227,7 +227,8 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
   - Generate a references section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
@@ -242,7 +243,8 @@ Consider the conversation history if provided to maintain conversational flow an
 
 4. References Section Format:
   - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - Reference list entries should adhere to the format: `* [n] Document Title (Page p)`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - If page number is not available, use `* [n] Document Title`.
   - The Document Title in the citation must retain its original language.
   - Output each citation on an individual line
   - Provide maximum of 5 most relevant citations.
@@ -252,9 +254,9 @@ Consider the conversation history if provided to maintain conversational flow an
 ```
 ### References
 
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
+- [1] Document Title One (Page 5)
+- [2] Document Title Two (Page 10)
+- [3] Document Title Three (Page 1)
 ```
 
 6. Additional Instructions: {user_prompt}
@@ -281,7 +283,8 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
   - Generate a **References** section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
@@ -296,7 +299,8 @@ Consider the conversation history if provided to maintain conversational flow an
 
 4. References Section Format:
   - The References section should be under heading: `### References`
-  - Reference list entries should adhere to the format: `* [n] Document Title`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - Reference list entries should adhere to the format: `* [n] Document Title (Page p)`. Do not include a caret (`^`) after opening square bracket (`[`).
+  - If page number is not available, use `* [n] Document Title`.
   - The Document Title in the citation must retain its original language.
   - Output each citation on an individual line
   - Provide maximum of 5 most relevant citations.
@@ -306,9 +310,9 @@ Consider the conversation history if provided to maintain conversational flow an
 ```
 ### References
 
-- [1] Document Title One
-- [2] Document Title Two
-- [3] Document Title Three
+- [1] Document Title One (Page 5)
+- [2] Document Title Two (Page 10)
+- [3] Document Title Three (Page 1)
 ```
 
 6. Additional Instructions: {user_prompt}
@@ -332,7 +336,7 @@ Knowledge Graph Data (Relationship):
 {relations_str}
 ```
 
-Document Chunks (Each entry has a reference_id refer to the `Reference Document List`):
+Document Chunks (Each entry has a reference_id refer to the `Reference Document List`, and optionally a page_start indicating the page number):
 
 ```json
 {text_chunks_str}
@@ -347,7 +351,7 @@ Reference Document List (Each entry starts with a [reference_id] that correspond
 """
 
 PROMPTS["naive_query_context"] = """
-Document Chunks (Each entry has a reference_id refer to the `Reference Document List`):
+Document Chunks (Each entry has a reference_id refer to the `Reference Document List`, and optionally a page_start indicating the page number):
 
 ```json
 {text_chunks_str}
