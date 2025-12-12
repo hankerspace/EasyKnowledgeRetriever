@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 
@@ -22,6 +22,7 @@ class NaiveRetrieval(BaseRetrieval):
     """Naive retrieval strategy using only vector search on text chunks."""
     mode: str = "naive"
     chunk_top_k: int = 20
+    prompt_template: str = field(default_factory=lambda: PROMPTS["naive_rag_response"])
 
     def _create_query_param(self) -> QueryParam:
         return QueryParam(
@@ -56,7 +57,7 @@ class NaiveRetrieval(BaseRetrieval):
             query_param=query_param,
             tokenizer=rag.tokenizer,
             max_total_tokens=rag.max_total_tokens,
-            system_prompt_template=PROMPTS["rag_response"],
+            system_prompt_template=self.prompt_template,
             chunk_tracking=chunk_tracking
         )
 

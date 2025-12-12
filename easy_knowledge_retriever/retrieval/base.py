@@ -9,6 +9,7 @@ from easy_knowledge_retriever.kg.base import (
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
+from easy_knowledge_retriever.llm.prompts import PROMPTS
 
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ class BaseRetrieval(ABC):
     conversation_history: list[dict[str, str]] = field(default_factory=list)
     reranker_service: BaseRerankerService | None = None
     query_decomposition: bool = False
+    prompt_template: str = field(default_factory=lambda: PROMPTS["rag_response"])
 
     @abstractmethod
     def _create_query_param(self) -> QueryParam:
@@ -110,6 +112,7 @@ async def _common_kg_retrieve(retrieval: BaseRetrieval, query: str, rag: "EasyKn
         max_total_tokens=rag.max_total_tokens,
         chunks_vdb=rag.chunks_vdb,
         retrieval=retrieval,
+        system_prompt_template=retrieval.prompt_template,
     )
     
     if context_result is None:

@@ -879,7 +879,7 @@ async def _build_context_str(
     # sys_prompt_template already set
 
     kg_context_template = PROMPTS["kg_query_context"]
-    user_prompt = query_param.user_prompt if query_param.user_prompt else ""
+    user_prompt = query + (f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "")
     response_type = (
         query_param.response_type
         if query_param.response_type
@@ -905,6 +905,7 @@ async def _build_context_str(
     # Calculate preliminary system prompt tokens
     pre_sys_prompt = system_prompt_template.format(
         context_data="",  # Empty for overhead calculation
+        content_data="",
         response_type=response_type,
         user_prompt=user_prompt,
     )
@@ -938,12 +939,13 @@ async def _build_context_str(
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
     chunks_context = []
     for i, chunk in enumerate(truncated_chunks):
-        chunks_context.append(
-            {
-                "reference_id": chunk["reference_id"],
-                "content": chunk["content"],
-            }
-        )
+        chunk_data = {
+            "reference_id": chunk["reference_id"],
+            "content": chunk["content"],
+        }
+        if chunk.get("page_start") is not None:
+            chunk_data["page_start"] = chunk.get("page_start")
+        chunks_context.append(chunk_data)
 
     text_units_str = "\n".join(
         json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context
@@ -1263,7 +1265,7 @@ async def kg_query(
         Returns None when no relevant context could be constructed for the query.
     """
     if not query:
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -1289,7 +1291,7 @@ async def kg_query(
             logger.warning(f"Forced low_level_keywords to origin query: {query}")
             ll_keywords = [query]
         else:
-            return QueryResult(content=PROMPTS["fail_response"])
+            return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
     hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
@@ -1321,10 +1323,10 @@ async def kg_query(
     # Return different content based on query parameters
     if query_param.only_need_context and not query_param.only_need_prompt:
         return QueryResult(
-            content=context_result.context, raw_data=context_result.raw_data
+            content=context_result.context, raw_data=context_result.raw_data, query=query
         )
 
-    user_prompt = f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "n/a"
+    user_prompt = query + (f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "")
     response_type = (
         query_param.response_type
         if query_param.response_type
@@ -1343,7 +1345,7 @@ async def kg_query(
 
     if query_param.only_need_prompt:
         prompt_content = "\n\n".join([sys_prompt, "---User Query---", user_query])
-        return QueryResult(content=prompt_content, raw_data=context_result.raw_data)
+        return QueryResult(content=prompt_content, raw_data=context_result.raw_data, query=query, system_prompt=sys_prompt, user_prompt=query_param.user_prompt or "")
 
     # Call LLM
     # tokenizer already checked/passed
@@ -1425,13 +1427,16 @@ async def kg_query(
                 .strip()
             )
 
-        return QueryResult(content=response, raw_data=context_result.raw_data)
+        return QueryResult(content=response, raw_data=context_result.raw_data, query=query, system_prompt=sys_prompt, user_prompt=query_param.user_prompt or "")
     else:
         # Streaming response (AsyncIterator)
         return QueryResult(
             response_iterator=response,
             raw_data=context_result.raw_data,
             is_streaming=True,
+            query=query,
+            system_prompt=sys_prompt,
+            user_prompt=query_param.user_prompt or ""
         )
 
 
@@ -1475,33 +1480,33 @@ async def naive_query(
     query: str,
     chunks_vdb: BaseVectorStorage,
     query_param: QueryParam,
+    tokenizer: Tokenizer,
+    llm_model_func: callable,
+    max_total_tokens: int,
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
     retrieval: "BaseRetrieval" = None,
+    enable_llm_cache: bool = True,
 ) -> QueryResult | None:
     """
     Execute naive query and return unified QueryResult object.
-
+    
     Args:
         query: Query string
         chunks_vdb: Document chunks vector database
         query_param: Query parameters
+        tokenizer: Tokenizer instance
+        llm_model_func: LLM model function
+        max_total_tokens: Max total tokens
         hashing_kv: Cache storage
         system_prompt: System prompt
         retrieval: Retrieval strategy instance
-
-    Returns:
-        QueryResult | None: Unified query result object containing:
-            - content: Non-streaming response text content
-            - response_iterator: Streaming response iterator
-            - raw_data: Complete structured data (including references and metadata)
-            - is_streaming: Whether this is a streaming result
-
-        Returns None when no relevant chunks are retrieved.
+        enable_llm_cache: Enable LLM cache
     """
 
+    # naive_query failure case
     if not query:
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     if query_param.model_func:
         use_model_func = query_param.model_func
@@ -1512,7 +1517,7 @@ async def naive_query(
 
     if not tokenizer:
         logger.error("Tokenizer not found.")
-        return QueryResult(content=PROMPTS["fail_response"])
+        return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     chunks = await get_vector_context(query, chunks_vdb, query_param.chunk_top_k or query_param.top_k, None)
 
@@ -1530,7 +1535,7 @@ async def naive_query(
     )
 
     # Calculate system prompt template tokens (excluding content_data)
-    user_prompt = f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "n/a"
+    user_prompt = query + (f"\n\n{query_param.user_prompt}" if query_param.user_prompt else "")
     response_type = (
         query_param.response_type
         if query_param.response_type
@@ -1624,7 +1629,7 @@ async def naive_query(
     )
 
     if query_param.only_need_context and not query_param.only_need_prompt:
-        return QueryResult(content=context_content, raw_data=raw_data)
+        return QueryResult(content=context_content, raw_data=raw_data, query=query)
 
     sys_prompt = sys_prompt_template.format(
         response_type=query_param.response_type,
@@ -1636,7 +1641,7 @@ async def naive_query(
 
     if query_param.only_need_prompt:
         prompt_content = "\n\n".join([sys_prompt, "---User Query---", user_query])
-        return QueryResult(content=prompt_content, raw_data=raw_data)
+        return QueryResult(content=prompt_content, raw_data=raw_data, query=query, system_prompt=sys_prompt, user_prompt=query_param.user_prompt or "")
 
     # Handle cache
     args_hash = compute_args_hash(
@@ -1706,11 +1711,11 @@ async def naive_query(
                 .strip()
             )
 
-        return QueryResult(content=response, raw_data=raw_data)
+        return QueryResult(content=response, raw_data=raw_data, query=query, system_prompt=sys_prompt, user_prompt=query_param.user_prompt or "")
     else:
         # Streaming response (AsyncIterator)
         return QueryResult(
-            response_iterator=response, raw_data=raw_data, is_streaming=True
+            response_iterator=response, raw_data=raw_data, is_streaming=True, query=query, system_prompt=sys_prompt, user_prompt=query_param.user_prompt or ""
         )
 
 
