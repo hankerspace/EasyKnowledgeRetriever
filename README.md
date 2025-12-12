@@ -10,11 +10,11 @@
 
 **Easy Knowledge Retriever** is a powerful and flexible library for building Retrieval-Augmented Generation (RAG) systems with integrated Knowledge Graph support. It allows you to easily ingest documents, build a structured knowledge base (combining vector embeddings and graph relations), and perform advanced queries using Large Language Models (LLMs).
 
-Full documentation (GitHub Pages): https://hankerspace.github.io/EasyKnowledgeRetriever/
+![Global Flow](docs/global.png)
 
 ## Features
 
-- **Multimodal Ingestion**: Parse & ingest PDF data containing images, tables, equations, ... Based on MinerU lib (https://github.com/opendatalab/MinerU).
+- **Multimodal Ingestion**: Parse & ingest PDF data containing images, tables, equations, ... Based on MinerU.
 - **Hybrid Retrieval**: Combines vector similarity search with knowledge graph exploration for more context-aware answers.
 - **Knowledge Graph Integration**: Automatically extracts entities and relationships from your text documents.
 - **Modular Storage**: Supports various backends for Key-Value pairs, Vector Stores, and Graph Storage (e.g., JSON, NanoVectorDB, NetworkX, Neo4j, Milvus).
@@ -242,9 +242,18 @@ To set up the project for development:
 pytest
 ```
 
-## RAGAS Evaluation
+## Evaluation
 
-The provided evaluation example yields an average `answer_relevancy` of 0.78 with Gemini 2.0 Flash Lite, and 0.81 with Gemini 2.5 Flash Lite. This indicates a strong correlation with the model used for knowledge graph generation and retrieval.
+### RAGAS Metrics
+
+*   **Faithfulness: 0.99**
+    The Faithfulness metric measures how factually consistent a response is with the retrieved context. It ranges from 0 to 1, with higher scores indicating better consistency.
+
+*   **Context Recall: 1.0**
+    Context Recall measures how many of the relevant documents (or pieces of information) were successfully retrieved. It focuses on not missing important results. Higher recall means fewer relevant documents were left out. In short, recall is about not missing anything important.
+
+*   **Answer Relevancy: 0.78 (Gemini 2.0 Flash Lite) / 0.81 (Gemini 2.5 Flash Lite)**
+    Answer Relevancy focuses on assessing how pertinent the generated answer is to the given prompt. A lower score is assigned to answers that are incomplete or contain redundant information, and higher scores indicate better relevancy.
 
 ## References
 
@@ -254,6 +263,8 @@ This project draws inspiration and references from the following projects:
 - [RAG-Anything](https://github.com/HKUDS/RAG-Anything)
 - [RagFlow](https://github.com/infiniflow/ragflow)
 - [Rag-Stack](https://github.com/finic-ai/rag-stack)
+- [Mineru](https://github.com/opendatalab/MinerU)
+- [RAGas](https://github.com/vibrantlabsai/ragas)
 
 ## License
 
