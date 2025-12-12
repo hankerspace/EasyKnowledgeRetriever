@@ -608,7 +608,18 @@ async def extract_entities(
                         )
 
             try:
-                return await _process_single_content(chunk)
+                # Retry logic: 3 retries on TimeoutError
+                max_retries = 3
+                for attempt in range(max_retries + 1):
+                    try:
+                        return await _process_single_content(chunk)
+                    except TimeoutError as e:
+                        if attempt < max_retries:
+                            logger.warning(
+                                f"Timeout occurred for chunk {chunk[0]} (attempt {attempt + 1}/{max_retries + 1}). Retrying..."
+                            )
+                            continue
+                        raise e
             except Exception as e:
                 chunk_id = chunk[0]  # Extract chunk_id from chunk[0]
                 prefixed_exception = create_prefixed_exception(e, chunk_id)
