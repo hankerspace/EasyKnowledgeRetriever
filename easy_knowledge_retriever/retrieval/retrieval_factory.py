@@ -1,10 +1,4 @@
 from easy_knowledge_retriever.retrieval.base import BaseRetrieval
-from easy_knowledge_retriever.retrieval.naive import NaiveRetrieval
-from easy_knowledge_retriever.retrieval.local import LocalRetrieval
-from easy_knowledge_retriever.retrieval.kg_global import GlobalRetrieval
-from easy_knowledge_retriever.retrieval.hybrid import HybridRetrieval
-from easy_knowledge_retriever.retrieval.mix import MixRetrieval
-from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval
 from easy_knowledge_retriever.kg.base import QueryParam
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
@@ -13,6 +7,13 @@ class RetrievalFactory:
     
     @staticmethod
     def create_retrieval(param: QueryParam, reranker_service: BaseRerankerService = None) -> BaseRetrieval:
+        from easy_knowledge_retriever.retrieval.naive import NaiveRetrieval
+        from easy_knowledge_retriever.retrieval.local import LocalRetrieval
+        from easy_knowledge_retriever.retrieval.kg_global import GlobalRetrieval
+        from easy_knowledge_retriever.retrieval.hybrid import HybridRetrieval
+        from easy_knowledge_retriever.retrieval.mix import MixRetrieval
+        from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval
+
         # Common params
         base_params = {
             "max_total_tokens": param.max_total_tokens,

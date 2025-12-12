@@ -1160,6 +1160,31 @@ class EasyKnowledgeRetriever:
             doc_content_raw = parsed_data.get("content", "")
             cleaned_content = sanitize_text_for_encoding(doc_content_raw)
             doc_id = compute_mdhash_id(cleaned_content, prefix="doc-")
+
+            # --- Duplicate Detection and Cleanup ---
+            # Check if this file was previously processed with a different ID (e.g., if content processing logic changed)
+            # If so, remove the old record to prevent duplicates (issue where same file is processed twice)
+            try:
+                existing_doc_result = await self.doc_status.get_doc_by_file_path(file_path)
+                if existing_doc_result:
+                    existing_doc_id, existing_doc_data = existing_doc_result
+
+                    if existing_doc_id != doc_id:
+                        print(f"Duplicate document detected with different ID. Removing old record: {existing_doc_id}")
+                        logger.warning(f"Duplicate document detected for {file_path}. New ID: {doc_id}, Old ID: {existing_doc_id}. Removing old record.")
+
+                        # Acquire deletion lock and delete old document
+                        # We use adelete_by_doc_id to ensure comprehensive cleanup (chunks, graph, etc.)
+                        delete_result = await self.adelete_by_doc_id(existing_doc_id)
+                        if delete_result.status != "success":
+                             logger.error(f"Failed to delete old duplicate document {existing_doc_id}: {delete_result.message}")
+                    else:
+                        # Same ID, existing logic in ainsert will handle idempotent check
+                        pass
+            except Exception as e:
+                logger.error(f"Error checking for duplicate document: {e}")
+                # Don't block ingestion if check fails
+                pass
             
             # --- Multimodal Processing (Image Summarization) ---
             if self.llm_model_func:
