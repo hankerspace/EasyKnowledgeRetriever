@@ -18,12 +18,12 @@ def parse_requirements(filename):
 
 setup(
     name="easy-knowledge-retriever",
-    version="1.1.0",
+    version="1.1.1",
     description="A simple and efficient RAG (Retrieval-Augmented Generation) library with Knowledge Graph support.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    author="Thomas Martinet",
-    author_email="your.email@example.com",
+    author="Hankerspace",
+    author_email="hankerspace@gmail.com",
     license="CC BY-NC-SA 4.0",
     packages=find_packages(),
     install_requires=parse_requirements("requirements.txt"),
