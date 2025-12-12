@@ -166,13 +166,13 @@ class DocStatusStorage(BaseKVStorage, ABC):
         """
 
     @abstractmethod
-    async def get_doc_by_file_path(self, file_path: str) -> dict[str, Any] | None:
+    async def get_doc_by_file_path(self, file_path: str) -> tuple[str, dict[str, Any]] | None:
         """Get document by file path
 
         Args:
             file_path: The file path to search for
 
         Returns:
-            dict[str, Any] | None: Document data if found, None otherwise
-            Returns the same format as get_by_ids method
+            tuple[str, dict[str, Any]] | None: Tuple of (doc_id, doc_data) if found, None otherwise
+            doc_data follows the same format as get_by_ids method
         """

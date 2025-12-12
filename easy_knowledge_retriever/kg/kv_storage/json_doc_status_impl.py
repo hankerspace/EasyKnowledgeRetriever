@@ -360,14 +360,14 @@ class JsonDocStatusStorage(DocStatusStorage):
             if any_deleted:
                 await set_all_update_flags(self.namespace, workspace=self.workspace)
 
-    async def get_doc_by_file_path(self, file_path: str) -> Union[dict[str, Any], None]:
+    async def get_doc_by_file_path(self, file_path: str) -> Union[tuple[str, dict[str, Any]], None]:
         """Get document by file path
 
         Args:
             file_path: The file path to search for
 
         Returns:
-            Union[dict[str, Any], None]: Document data if found, None otherwise
+            Union[tuple[str, dict[str, Any]], None]: Tuple of (doc_id, doc_data) if found, None otherwise
             Returns the same format as get_by_ids method
         """
         if self._storage_lock is None:
@@ -377,7 +377,7 @@ class JsonDocStatusStorage(DocStatusStorage):
             for doc_id, doc_data in self._data.items():
                 if doc_data.get("file_path") == file_path:
                     # Return complete document data, consistent with get_by_ids method
-                    return doc_data
+                    return doc_id, doc_data
 
         return None
 

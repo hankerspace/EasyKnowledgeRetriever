@@ -689,14 +689,14 @@ class PGDocStatusStorage(DocStatusStorage):
 
         return ordered_results
 
-    async def get_doc_by_file_path(self, file_path: str) -> Union[dict[str, Any], None]:
+    async def get_doc_by_file_path(self, file_path: str) -> Union[tuple[str, dict[str, Any]], None]:
         """Get document by file path
 
         Args:
             file_path: The file path to search for
 
         Returns:
-            Union[dict[str, Any], None]: Document data if found, None otherwise
+            Union[tuple[str, dict[str, Any]], None]: Tuple of (doc_id, doc_data) if found, None otherwise
             Returns the same format as get_by_id method
         """
         sql = "select * from EKR_DOC_STATUS where workspace=$1 and file_path=$2"
@@ -726,7 +726,7 @@ class PGDocStatusStorage(DocStatusStorage):
             created_at = self._format_datetime_with_timezone(result[0]["created_at"])
             updated_at = self._format_datetime_with_timezone(result[0]["updated_at"])
 
-            return dict(
+            doc_data = dict(
                 content_length=result[0]["content_length"],
                 content_summary=result[0]["content_summary"],
                 status=result[0]["status"],
@@ -739,6 +739,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 error_msg=result[0].get("error_msg"),
                 track_id=result[0].get("track_id"),
             )
+            return result[0]["id"], doc_data
 
     async def get_status_counts(self) -> dict[str, int]:
         """Get counts of documents in each status"""
