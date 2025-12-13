@@ -528,16 +528,48 @@ async def gpt_4o_mini_complete(
     )
 
 
-@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(20),
+    wait=wait_exponential(multiplier=2, min=2, max=60),
     retry=(
         retry_if_exception_type(RateLimitError)
         | retry_if_exception_type(APIConnectionError)
         | retry_if_exception_type(APITimeoutError)
     ),
 )
+async def _embed_batch_with_retry(
+    client,
+    texts: list[str],
+    api_model: str,
+    embedding_dim: int | None,
+    token_tracker: Any | None,
+) -> list[np.ndarray]:
+    api_params = {
+        "model": api_model,
+        "input": texts,
+        "encoding_format": "base64",
+    }
+    if embedding_dim is not None:
+        api_params["dimensions"] = embedding_dim
+
+    response = await client.embeddings.create(**api_params)
+
+    if token_tracker and hasattr(response, "usage"):
+        token_counts = {
+            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
+            "total_tokens": getattr(response.usage, "total_tokens", 0),
+        }
+        token_tracker.add_usage(token_counts)
+
+    return [
+        np.array(dp.embedding, dtype=np.float32)
+        if isinstance(dp.embedding, list)
+        else np.frombuffer(base64.b64decode(dp.embedding), dtype=np.float32)
+        for dp in response.data
+    ]
+
+
+@wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
 async def openai_embed(
     texts: list[str],
     model: str = "text-embedding-3-small",
@@ -549,6 +581,7 @@ async def openai_embed(
     use_azure: bool = False,
     azure_deployment: str | None = None,
     api_version: str | None = None,
+    batch_size: int = 100,
 ) -> np.ndarray:
     """Generate embeddings for a list of texts using OpenAI's API.
 
@@ -580,6 +613,7 @@ async def openai_embed(
         api_version: Azure OpenAI API version (e.g., "2024-02-15-preview"). Only used
             when use_azure=True. If not specified, falls back to AZURE_EMBEDDING_API_VERSION
             environment variable.
+        batch_size: Batch size for API requests. Default is 100 to support Gemini API limits.
 
     Returns:
         A numpy array of embeddings, one per input text.
@@ -604,39 +638,23 @@ async def openai_embed(
         # For Azure OpenAI, we must use the deployment name instead of the model name
         api_model = azure_deployment if use_azure and azure_deployment else model
 
-        # Prepare API call parameters
-        api_params = {
-            "model": api_model,
-            "input": texts,
-            "encoding_format": "base64",
-        }
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i : i + batch_size]
+            batch_embeddings = await _embed_batch_with_retry(
+                client=openai_async_client,
+                texts=batch_texts,
+                api_model=api_model,
+                embedding_dim=embedding_dim,
+                token_tracker=token_tracker,
+            )
+            all_embeddings.extend(batch_embeddings)
 
-        # Add dimensions parameter only if embedding_dim is provided
-        if embedding_dim is not None:
-            api_params["dimensions"] = embedding_dim
-
-        # Make API call
-        response = await openai_async_client.embeddings.create(**api_params)
-
-        if token_tracker and hasattr(response, "usage"):
-            token_counts = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-                "total_tokens": getattr(response.usage, "total_tokens", 0),
-            }
-            token_tracker.add_usage(token_counts)
-
-        embeddings = np.array(
-            [
-                np.array(dp.embedding, dtype=np.float32)
-                if isinstance(dp.embedding, list)
-                else np.frombuffer(base64.b64decode(dp.embedding), dtype=np.float32)
-                for dp in response.data
-            ]
-        )
+        embeddings = np.array(all_embeddings)
 
         # If embedding_dim is provided and the returned vectors are larger, slice them
         # This handles cases where the API ignores the 'dimensions' parameter (e.g. some MRL models)
-        if embedding_dim is not None and embeddings.shape[1] > embedding_dim:
+        if embedding_dim is not None and embeddings.size > 0 and embeddings.shape[1] > embedding_dim:
             logger.debug(
                 f"Slicing embeddings from {embeddings.shape[1]} to {embedding_dim} dimensions"
             )
