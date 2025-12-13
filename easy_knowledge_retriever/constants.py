@@ -30,6 +30,7 @@ DEFAULT_ENTITY_TYPES = [
     "Location",
     "Event",
     "Concept",
+    "Action",
     "Method",
     "Content",
     "Data",
@@ -84,7 +85,7 @@ DEFAULT_MAX_ASYNC = 1
 DEFAULT_LLM_TIMEOUT = 60
 
 # Embedding execution defaults
-DEFAULT_EMBEDDING_BATCH_NUM = 1
+DEFAULT_EMBEDDING_BATCH_NUM = 16
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 1
 DEFAULT_EMBEDDING_TIMEOUT = 60
 

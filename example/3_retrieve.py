@@ -1,8 +1,11 @@
 import asyncio
 import os
 import sys
+
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from easy_knowledge_retriever.retrieval import HybridRetrieval, HybridMixRetrieval
 
 from easy_knowledge_retriever import EasyKnowledgeRetriever, QueryParam
 from easy_knowledge_retriever.retrieval.mix import MixRetrieval
@@ -53,7 +56,7 @@ async def main():
         base_url=llm_base_url
     )
 
-    # Initialize EasyKnowledgeRetriever
+    # Initialize EasyKnowledgeRetriever with JsonKVStorage explicitly
     rag = EasyKnowledgeRetriever(
         working_dir=working_dir,
         llm_service=llm_service,
@@ -75,7 +78,7 @@ async def main():
         
         # Use Mix retrieval strategy
         # param = QueryParam(mode="mix",only_need_prompt=False )
-        retrieval = MixRetrieval()
+        retrieval = HybridMixRetrieval()
         
         # We can still pass param for generation settings if needed, or rely on defaults
         # But aquery uses retrieval for retrieval strategy.
@@ -83,13 +86,31 @@ async def main():
         print("\nResult Content:")
         print(result.content)
 
-        print("\nRetrieved Entities:")
-        for entity in result.entities:
-            print(f" - {entity.entity_name} ({entity.entity_type})")
-
-        print("\nReferenced Files:")
-        for file in result.files:
-            print(f" - {file}")
+        # print("\nPrompts:")
+        # print(f"   System Prompt: {result.system_prompt}")
+        # print(f"   User Prompt: {result.user_prompt}")
+        #
+        # print("\nRetrieved Entities:")
+        # for entity in result.entities:
+        #     print(f" - {entity.entity_name} ({entity.entity_type})")
+        #
+        # print("\nRetrieved Relations:")
+        # for relation in result.relationships:
+        #     print(f"   Relation: {relation.description} between {relation.src_id} and {relation.tgt_id} (Weight: {relation.weight}, Keywords: {relation.keywords})")
+        #
+        # print("\nRetrieved Chunks:")
+        # for chunk in result.chunks:
+        #     print(f"\n - Chunk ID: {chunk.chunk_id}")
+        #     print(f"   Full Doc ID: {chunk.file_path}")
+        #     if chunk.page_start is not None:
+        #         print(f"   Page Start: {chunk.page_start}")
+        #     if chunk.page_end is not None:
+        #         print(f"   Page End: {chunk.page_end}")
+        #     print(f"   Content: {chunk.content[:200]}...")  # Print first 200 chars
+        #
+        # print("\nReferenced Files:")
+        # for file in result.files:
+        #     print(f" - {file}")
         
     finally:
         await rag.finalize_storages()

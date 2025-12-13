@@ -2750,7 +2750,7 @@ class EasyKnowledgeRetriever:
                 [],  # no references
                 "bypass",
             )
-            query_result = QueryResult(content="", raw_data=empty_raw_data)
+            query_result = QueryResult(content="", raw_data=empty_raw_data, query=query)
         else:
             raise ValueError(f"Unknown mode {data_param.mode}")
 
@@ -2887,7 +2887,10 @@ class EasyKnowledgeRetriever:
                     response_iterator=response if is_streaming else None,
                     is_streaming=is_streaming,
                     metadata={},
-                    raw_data={}
+                    raw_data={},
+                    query=query,
+                    system_prompt=system_prompt or "",
+                    user_prompt=param.user_prompt or ""
                 )
 
             # Standard RAG mode
@@ -2902,7 +2905,10 @@ class EasyKnowledgeRetriever:
                     metadata={
                         "failure_reason": "no_results",
                         "mode": retrieval.mode,
-                    }
+                    },
+                    query=query,
+                    system_prompt="",
+                    user_prompt=param.user_prompt or ""
                  )
 
             parsed_data = self._parse_raw_data_to_lists(query_context_result.raw_data or {})
@@ -2917,10 +2923,13 @@ class EasyKnowledgeRetriever:
                     context=query_context_result.context,
                     raw_data=query_context_result.raw_data,
                     metadata=query_context_result.raw_data.get("metadata", {}),
+                    query=query,
+                    system_prompt="",
+                    user_prompt=param.user_prompt or "",
                     **parsed_data
                 )
 
-            user_prompt = f"\n\n{param.user_prompt}" if param.user_prompt else "n/a"
+            user_prompt = query + (f"\n\n{param.user_prompt}" if param.user_prompt else "")
             response_type = (
                 param.response_type
                 if param.response_type
@@ -2942,6 +2951,9 @@ class EasyKnowledgeRetriever:
                      content=sys_prompt,
                      raw_data=query_context_result.raw_data,
                      metadata=query_context_result.raw_data.get("metadata", {}),
+                     query=query,
+                     system_prompt=sys_prompt,
+                     user_prompt=param.user_prompt or "",
                      **parsed_data
                  )
 
@@ -2975,6 +2987,9 @@ class EasyKnowledgeRetriever:
                     "param": asdict(param),
                     **(query_context_result.raw_data.get("metadata", {}) or {})
                 },
+                query=query,
+                system_prompt=sys_prompt,
+                user_prompt=param.user_prompt or "",
                 **parsed_data
             )
             
@@ -2988,7 +3003,10 @@ class EasyKnowledgeRetriever:
             return QueryResult(
                 status="failure",
                 message=f"Query failed: {str(e)}",
-                content=None
+                content=None,
+                query=query,
+                system_prompt="",
+                user_prompt=param.user_prompt or ""
             )
 
     def query_llm(

@@ -135,5 +135,6 @@ class OpenAIEmbeddingService(BaseEmbeddingService):
             texts=texts,
             model=self.model,
             base_url=self.base_url,
-            api_key=self.api_key
+            api_key=self.api_key,
+            batch_size=self.batch_num
         )

@@ -202,6 +202,8 @@ def convert_to_user_format(
             "content": chunk.get("content", ""),
             "file_path": chunk.get("file_path", "unknown_source"),
             "chunk_id": chunk.get("chunk_id", ""),
+            "page_start": chunk.get("page_start"),
+            "page_end": chunk.get("page_end"),
         }
         formatted_chunks.append(chunk_data)
 

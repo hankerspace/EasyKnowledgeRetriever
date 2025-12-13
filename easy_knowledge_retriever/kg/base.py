@@ -21,6 +21,7 @@ class TextChunkSchema(TypedDict):
     content: str
     full_doc_id: str
     chunk_order_index: int
+    page_start: Optional[int]
 
 
 T = TypeVar("T")
@@ -212,6 +213,8 @@ class Chunk:
     file_path: str
     chunk_id: str
     reference_id: str = ""
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 @dataclass
 class Reference:
@@ -245,6 +248,9 @@ class QueryResult:
     is_streaming: bool = False
     
     # New structured fields
+    query: str = ""
+    system_prompt: str = ""
+    user_prompt: str = ""
     context: Optional[str] = None
     entities: List[Entity] = field(default_factory=list)
     relationships: List[Relationship] = field(default_factory=list)
