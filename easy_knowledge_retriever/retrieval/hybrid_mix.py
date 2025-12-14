@@ -8,6 +8,7 @@ from easy_knowledge_retriever.kg.base import QueryParam, QueryContextResult
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.retrieval.base import BaseRetrieval, _common_kg_retrieve
+from easy_knowledge_retriever.retrieval.ops import get_node_data, get_edge_data
 from easy_knowledge_retriever.utils.logger import logger
 
 
@@ -18,10 +19,11 @@ def simple_tokenize(text: str) -> List[str]:
 @dataclass
 class HybridMixRetrieval(BaseRetrieval):
     """
-    Hybrid Retrieval (Sparse + Dense) with RRF Fusion.
+    Hybrid Retrieval (Sparse + Dense + Graph) with RRF Fusion.
     Dense: Vector Search.
     Sparse: BM25 (or simple keyword matching).
     Fusion: RRF (Reciprocal Rank Fusion).
+    Graph: Local (Entities) + Global (Relations).
     """
     mode: str = "hybrid_mix"
     top_k: int = 40  # Total chunks to retrieve after fusion
@@ -84,11 +86,37 @@ class HybridMixRetrieval(BaseRetrieval):
                     "order": i + 1,
                 }
 
+        # 4. Graph Search (Local + Global)
+        local_entities = []
+        local_relations = []
+        global_entities = []
+        global_relations = []
+        
+        # Local search
+        search_query_local = ", ".join(self.ll_keywords) if self.ll_keywords else ""
+        if search_query_local:
+             local_entities, local_relations = await get_node_data(
+                search_query_local,
+                knowledge_graph_inst,
+                entities_vdb,
+                self.top_k
+            )
+
+        # Global search
+        search_query_global = ", ".join(self.hl_keywords) if self.hl_keywords else ""
+        if search_query_global:
+            global_relations, global_entities = await get_edge_data(
+                search_query_global,
+                knowledge_graph_inst,
+                relationships_vdb,
+                self.top_k
+            )
+
         return {
-            "local_entities": [],
-            "local_relations": [],
-            "global_entities": [],
-            "global_relations": [],
+            "local_entities": local_entities,
+            "local_relations": local_relations,
+            "global_entities": global_entities,
+            "global_relations": global_relations,
             "vector_chunks": fused_chunks,
             "chunk_tracking": chunk_tracking
         }

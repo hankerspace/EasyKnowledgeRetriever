@@ -11,7 +11,7 @@ Easy Knowledge Retriever provides multiple retrieval strategies to cater to diff
 | **Global** | `global` | Relation-focused Graph Retrieval. | Thematic questions, understanding connections between concepts. |
 | **Hybrid** | `hybrid` | Combines Local (Entity) and Global (Relation) Graph Retrieval. | Comprehensive Graph-based understanding. |
 | **Mix** | `mix` | Combines Graph (Hybrid) and Vector (Naive) Retrieval. | The most robust strategy, leveraging both structured and unstructured data. |
-| **HybridMix** | `hybrid_mix` | Hybrid Search on Chunks (Vector + BM25) with RRF Fusion. | Advanced text search without Graph overhead. |
+| **HybridMix** | `hybrid_mix` | Combines Advanced Chunk Search (Vector + BM25 + RRF) and Knowledge Graph (Local + Global). | The most comprehensive strategy, utilizing all available retrieval methods. |
 
 ## Detailed Workflows
 
@@ -59,13 +59,14 @@ Combines the best of both worlds: Structured Graph knowledge and Unstructured Ve
 4.  **Benefit**: Handles queries where the answer might be in the graph structure OR in specific text details not captured by the graph.
 
 ### 6. HybridMix Retrieval (`hybrid_mix`)
-**Type**: Advanced Chunk Search (Dense + Sparse)
+**Type**: Ultimate Composite (Dense + Sparse + Graph)
 
-Does **not** use the Knowledge Graph. It improves upon Naive Retrieval by adding keyword matching.
+Combines Advanced Chunk Search with Knowledge Graph retrieval.
 1.  **Dense Search**: Vector search on chunks (Semantic match).
-2.  **Sparse Search**: BM25 (or similar) keyword search on chunks (Exact match).
-3.  **RRF Fusion**: Combines results using Reciprocal Rank Fusion to rank the best chunks.
-4.  **Benefit**: Better retrieval accuracy than simple Vector Search, especially for specific terms, without the complexity of building a Graph.
+2.  **Sparse Search**: BM25 keyword search on chunks (Exact match).
+3.  **RRF Fusion**: Combines Dense and Sparse results using Reciprocal Rank Fusion.
+4.  **Graph Retrieval**: Performs **Local** (Entity) and **Global** (Relation) searches in the Knowledge Graph.
+5.  **Benefit**: Maximizes recall and precision by leveraging vector semantics, exact keyword matching, and structured graph knowledge simultaneously.
 
 ## How to use
 
