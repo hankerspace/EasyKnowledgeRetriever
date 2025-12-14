@@ -285,7 +285,7 @@ This dataset comprises scientific research papers in PDF format, specifically fo
 *   **Context Recall: 1.0** (in both cases)
 *   **Answer Relevancy**:
     *   **0.92** with Gemini 2.5 Flash Lite (Standard Retrieval without reranker).
-    *   **0.94** with Gemini 2.5 Flash Lite using a **Reranker** and **HybridMixRetrieval** (combining Hybrid Vector Search + Knowledge Graph + Query Decomposition).
+    *   **0.96** with Gemini 2.5 Flash Lite using a **Reranker** and **HybridMixRetrieval** (combining Hybrid Vector Search + Knowledge Graph + Query Decomposition).
 
 ## References
 
