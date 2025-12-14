@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from easy_knowledge_retriever.retrieval import HybridRetrieval, HybridMixRetrieval
 
-from easy_knowledge_retriever import EasyKnowledgeRetriever, QueryParam
+from easy_knowledge_retriever import EasyKnowledgeRetriever
 from easy_knowledge_retriever.retrieval.mix import MixRetrieval
 from easy_knowledge_retriever.llm.service import OpenAILLMService, OpenAIEmbeddingService
 
@@ -77,7 +77,6 @@ async def main():
         print(f"\nQuerying: '{query_text}'")
         
         # Use Mix retrieval strategy
-        # param = QueryParam(mode="mix",only_need_prompt=False )
         retrieval = HybridMixRetrieval()
         
         # We can still pass param for generation settings if needed, or rely on defaults

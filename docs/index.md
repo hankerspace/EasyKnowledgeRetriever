@@ -23,7 +23,8 @@ Build a local knowledge base and query it using JSON/Nano/NetworkX backends.
 
 ```python
 import asyncio
-from easy_knowledge_retriever import EasyKnowledgeRetriever, QueryParam
+from easy_knowledge_retriever import EasyKnowledgeRetriever
+from easy_knowledge_retriever.retrieval import MixRetrieval
 from easy_knowledge_retriever.llm.service import OpenAILLMService, OpenAIEmbeddingService
 from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
 from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
@@ -56,7 +57,7 @@ async def main():
     await rag.initialize_storages()
     try:
         await rag.ingest("./documents/example.pdf")
-        result = await rag.aquery("What does the document say about forest fires?", param=QueryParam(mode="mix"))
+        result = await rag.aquery("What does the document say about forest fires?", retrieval=MixRetrieval())
         print(result.content)
     finally:
         await rag.finalize_storages()

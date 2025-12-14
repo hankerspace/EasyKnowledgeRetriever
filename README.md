@@ -101,7 +101,8 @@ Once the database is built, you can query it.
 
 ```python
 import asyncio
-from easy_knowledge_retriever import EasyKnowledgeRetriever, QueryParam
+from easy_knowledge_retriever import EasyKnowledgeRetriever
+from easy_knowledge_retriever.retrieval import MixRetrieval
 from easy_knowledge_retriever.llm.service import OpenAILLMService, OpenAIEmbeddingService
 from easy_knowledge_retriever.kg.json_kv_impl import JsonKVStorage
 from easy_knowledge_retriever.kg.nano_vector_db_impl import NanoVectorDBStorage
@@ -141,10 +142,10 @@ async def query_knowledge_base():
         query_text = "What does the document say about forest fires?"
         
         # 'mix' mode uses both vector search and knowledge graph
-        param = QueryParam(mode="mix") 
+        # Use MixRetrieval strategy
         
         print(f"Querying: {query_text}")
-        result = await rag.aquery(query_text, param=param)
+        result = await rag.aquery(query_text, retrieval=MixRetrieval())
         
         print("\nAnswer:")
         print(result)
@@ -199,6 +200,19 @@ The retrieval process employs a hybrid strategy that orchestrates parallel searc
     *   **Vector Search**: Finds semantically similar text chunks from the vector database using the query embedding.
 3.  **Fusion & Context Building**: Results from all sources are merged, deduplicated, and mapped back to their original source text chunks. This comprehensive context is then provided to the LLM to generate an accurate, grounded response.
 
+## Available Retrieval Strategies
+
+Easy Knowledge Retriever offers flexible retrieval strategies to suit different use cases:
+
+- **Naive** (`naive`): Standard Vector Search on text chunks. Best for simple exact matches.
+- **Local** (`local`): Entity-focused Graph Retrieval. Best for specific details about entities.
+- **Global** (`global`): Relation-focused Graph Retrieval. Best for broad thematic questions.
+- **Hybrid** (`hybrid`): Combines Local and Global Graph Retrieval.
+- **Mix** (`mix`): Combines Graph (Hybrid) and Vector (Naive). **Recommended default** for best performance.
+- **HybridMix** (`hybrid_mix`): Advanced Chunk Search combining Dense (Vector) and Sparse (BM25) search with Fusion.
+
+For detailed workflows and comparisons, see [Retrieval Strategies Documentation](docs/RetrievalStrategies.md).
+
 ## Advanced Configuration
 
 ### Storage Options
@@ -244,7 +258,13 @@ pytest
 
 ## Evaluation
 
-### RAGAS Metrics
+The system is evaluated using the RAGAS framework on two distinct datasets to assess performance across different domains and document types.
+
+### Dataset 1: Text Files (General Knowledge)
+
+This dataset consists of plain text files covering general topics such as **Forest Fires** and **Childbirth**. It tests the system's ability to retrieve information from unstructured text.
+
+**Results (Dataset 1):**
 
 *   **Faithfulness: 0.99**
     The Faithfulness metric measures how factually consistent a response is with the retrieved context. It ranges from 0 to 1, with higher scores indicating better consistency.
@@ -254,6 +274,18 @@ pytest
 
 *   **Answer Relevancy: 0.78 (Gemini 2.0 Flash Lite) / 0.81 (Gemini 2.5 Flash Lite)**
     Answer Relevancy focuses on assessing how pertinent the generated answer is to the given prompt. A lower score is assigned to answers that are incomplete or contain redundant information, and higher scores indicate better relevancy.
+
+### Dataset 2: Scientific PDFs (Technical Domain)
+
+This dataset comprises scientific research papers in PDF format, specifically focusing on **Deep Reinforcement Learning (DRL) for Autonomous Vehicle Intersection Management**. It evaluates the system's capability to handle complex documents, scientific terminology, and multi-modal content.
+
+**Results (Dataset 2):**
+
+*   **Faithfulness: 1.0** (in both cases)
+*   **Context Recall: 1.0** (in both cases)
+*   **Answer Relevancy**:
+    *   **0.92** with Gemini 2.5 Flash Lite (Standard Retrieval without reranker).
+    *   **0.94** with Gemini 2.5 Flash Lite using a **Reranker** and **HybridMixRetrieval** (combining Hybrid Vector Search + Knowledge Graph + Query Decomposition).
 
 ## References
 

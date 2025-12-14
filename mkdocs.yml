@@ -17,6 +17,7 @@ theme:
 nav:
   - Home: index.md
   - Service & Configuration Catalog: ServiceCatalog.md
+  - Retrieval Strategies: RetrievalStrategies.md
 
 markdown_extensions:
   - admonition

@@ -3,6 +3,7 @@ import os
 import sys
 import shutil
 
+from easy_knowledge_retriever.reranker.openai import OpenAIRerankerService
 from easy_knowledge_retriever.retrieval import MixRetrieval, HybridMixRetrieval
 
 # --- Patch for multiprocess bug on Python 3.12+ (Windows) ---
@@ -61,13 +62,16 @@ DATA_DIR = os.path.join(EVAL_DIR, "data")
 WORK_DIR = os.path.join(EVAL_DIR, "work_dir")
 
 # LLM Configuration (using same keys as example for now - user should replace or env vars)
-LLM_API_KEY = ""
+LLM_API_KEY = "AIzaSyAfd4owmFzZMjTP0-ByWqxH_XGGdhAfSaM"
 LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 LLM_MODEL = "gemini-2.5-flash-lite"
-EMBEDDING_API_KEY = ""
+EMBEDDING_API_KEY = "AIzaSyAfd4owmFzZMjTP0-ByWqxH_XGGdhAfSaM"
 EMBEDDING_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIM = 3072
+RERANKER_API_KEY = "gpustack_a446e348d5180a0b_a90a04f559a3aee4e0a24bc7ab4aef2e"
+RERANKER_BASE_URL = "https://llm.isaratech.com/v1"
+RERANKER_MODEL = "bge-reranker-v2-m3"
 
 async def setup_rag():
     if not os.path.exists(WORK_DIR):
@@ -86,6 +90,12 @@ async def setup_rag():
         base_url=LLM_BASE_URL
     )
 
+    reranker_service = OpenAIRerankerService(
+        api_key=RERANKER_API_KEY,
+        base_url=RERANKER_BASE_URL,
+        model=RERANKER_MODEL
+    )
+
     rag = EasyKnowledgeRetriever(
         working_dir=WORK_DIR,
         llm_service=llm_service,
@@ -94,6 +104,7 @@ async def setup_rag():
         vector_storage=NanoVectorDBStorage(working_dir=WORK_DIR, cosine_better_than_threshold=0.2),
         graph_storage=NetworkXStorage(working_dir=WORK_DIR),
         doc_status_storage=JsonDocStatusStorage(working_dir=WORK_DIR),
+        reranker_service=reranker_service
     )
     
     await rag.initialize_storages()
@@ -158,7 +169,7 @@ async def collect_data():
         
         for i, question in enumerate(test_questions):
             print(f"Querying: {question}")
-            result = await rag.aquery_llm(question, retrieval=HybridMixRetrieval())
+            result = await rag.aquery(question, retrieval=HybridMixRetrieval())
             
 
             answer = result.content or ""
