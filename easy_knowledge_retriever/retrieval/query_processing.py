@@ -872,6 +872,28 @@ async def _merge_all_chunks(
     return merged_chunks
 
 
+def reorder_chunks_lost_in_middle(chunks: list[dict]) -> list[dict]:
+    """
+    Reorder chunks to mitigate 'Lost in the Middle' phenomenon.
+    Places best chunks at the beginning and end, and worst in the middle.
+    Assumes chunks are already sorted by relevance (descending).
+    Logic: [1, 2, 3, 4, 5, 6] -> [1, 3, 5] + [6, 4, 2]
+    """
+    if not chunks:
+        return []
+        
+    best_chunks = []
+    other_chunks = []
+    
+    for i, chunk in enumerate(chunks):
+        if i % 2 == 0:
+            best_chunks.append(chunk)
+        else:
+            other_chunks.append(chunk)
+            
+    return best_chunks + other_chunks[::-1]
+
+
 async def _build_context_str(
     entities_context: list[dict],
     relations_context: list[dict],
@@ -965,6 +987,9 @@ async def _build_context_str(
         truncated_chunks
     )
 
+    # Reorder for "Lost in the Middle"
+    truncated_chunks = reorder_chunks_lost_in_middle(truncated_chunks)
+
     # Rebuild chunks_context with truncated chunks
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
     chunks_context = []
@@ -1048,6 +1073,31 @@ async def _build_context_str(
     return result, final_data
 
 
+async def generate_hyde_embedding(query: str, llm_func: callable, embedding_func: callable) -> list[float]:
+    """
+    Generate HyDE (Hypothetical Document Embedding) for the query.
+    """
+    try:
+        # 1. Generate hypothetical answer
+        prompt = f"Write a hypothetical answer to the following question: {query}"
+        hypothetical_answer = await llm_func(prompt, system_prompt=None, history_messages=[])
+        hypothetical_answer = remove_think_tags(hypothetical_answer)
+        
+        # 2. Embed the hypothetical answer
+        if isinstance(hypothetical_answer, str) and len(hypothetical_answer) > 0:
+             # Embedding func usually expects a list
+             embeddings = await embedding_func([hypothetical_answer])
+             if embeddings:
+                 return embeddings[0]
+                 
+    except Exception as e:
+        logger.warning(f"HyDE generation failed: {e}")
+        
+    # Fallback to normal query embedding
+    embeddings = await embedding_func([query])
+    return embeddings[0]
+
+
 async def _build_query_context(
     query: str,
     ll_keywords: str,
@@ -1065,6 +1115,7 @@ async def _build_query_context(
     system_prompt_template: str = PROMPTS["rag_response"],
     chunks_vdb: BaseVectorStorage = None,
     retrieval: "BaseRetrieval" = None,
+    llm_model_func: callable = None,
 ) -> QueryContextResult | None:
     """
     Main query context building function using the new 4-stage architecture:
@@ -1083,15 +1134,18 @@ async def _build_query_context(
         logger.warning("No retrieval object provided to _build_query_context, creating from param")
         retrieval = RetrievalFactory.create_retrieval(query_param)
 
-    # Pre-compute query embedding if needed
+    # Pre-compute query embedding if needed (with HyDE support)
     query_embedding = None
     
     if query and (kg_chunk_pick_method == "VECTOR" or chunks_vdb):
         actual_embedding_func = text_chunks_db.embedding_func
         if actual_embedding_func:
             try:
-                query_embedding = await actual_embedding_func([query])
-                query_embedding = query_embedding[0]
+                if llm_model_func:
+                    query_embedding = await generate_hyde_embedding(query, llm_model_func, actual_embedding_func)
+                else:
+                    query_embedding = await actual_embedding_func([query])
+                    query_embedding = query_embedding[0]
             except Exception as e:
                 logger.warning(f"Failed to pre-compute query embedding: {e}")
                 query_embedding = None
@@ -1304,47 +1358,81 @@ async def kg_query(
         # Apply higher priority (5) to query relation LLM function
         use_model_func = partial(use_model_func, _priority=5)
 
-    hl_keywords, ll_keywords = await get_keywords_from_query(
-        query, query_param, tokenizer, llm_model_func, enable_llm_cache, language, hashing_kv
-    )
+    context_result = None
 
-    logger.debug(f"High-level keywords: {hl_keywords}")
-    logger.debug(f"Low-level  keywords: {ll_keywords}")
+    # Decomposition
+    if getattr(query_param, "query_decomposition", False):
+        sub_queries = await decompose_query(query, use_model_func)
+        if len(sub_queries) > 1:
+            logger.info(f"Decomposed query into: {sub_queries}")
+            sub_results = []
+            for sub_q in sub_queries:
+                # Get keywords for sub query
+                s_hl, s_ll = await get_keywords_from_query(
+                    sub_q, query_param, tokenizer, llm_model_func, enable_llm_cache, language, hashing_kv
+                )
+                
+                if not s_hl and not s_ll:
+                     s_ll = [sub_q]
+                
+                res = await _build_query_context(
+                    sub_q,
+                    ", ".join(s_ll) if s_ll else "",
+                    ", ".join(s_hl) if s_hl else "",
+                    knowledge_graph_inst, entities_vdb, relationships_vdb, text_chunks_db,
+                    query_param, tokenizer, kg_chunk_pick_method, max_related_chunks,
+                    max_total_tokens, system_prompt_template, chunks_vdb, retrieval, 
+                    llm_model_func=use_model_func
+                )
+                if res:
+                    sub_results.append(res)
+            
+            if sub_results:
+                context_result = merge_query_results(sub_results)
 
-    # Handle empty keywords
-    if ll_keywords == [] and query_param.mode in ["local", "hybrid", "mix"]:
-        logger.warning("low_level_keywords is empty")
-    if hl_keywords == [] and query_param.mode in ["global", "hybrid", "mix"]:
-        logger.warning("high_level_keywords is empty")
-    if hl_keywords == [] and ll_keywords == []:
-        if len(query) < 50:
-            logger.warning(f"Forced low_level_keywords to origin query: {query}")
-            ll_keywords = [query]
-        else:
-            return QueryResult(content=PROMPTS["fail_response"], query=query)
+    # Standard Flow (if not decomposed or decomposition failed/yielded nothing)
+    if context_result is None:
+        hl_keywords, ll_keywords = await get_keywords_from_query(
+            query, query_param, tokenizer, llm_model_func, enable_llm_cache, language, hashing_kv
+        )
 
-    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
-    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+        logger.debug(f"High-level keywords: {hl_keywords}")
+        logger.debug(f"Low-level  keywords: {ll_keywords}")
 
-    # Build query context (unified interface)
-    context_result = await _build_query_context(
-        query,
-        ll_keywords_str,
-        hl_keywords_str,
-        knowledge_graph_inst,
-        entities_vdb,
-        relationships_vdb,
-        text_chunks_db,
-        query_param,
-        query_param,
-        tokenizer,
-        kg_chunk_pick_method,
-        max_related_chunks,
-        max_total_tokens,
-        system_prompt_template,
-        chunks_vdb,
-        retrieval=retrieval,
-    )
+        # Handle empty keywords
+        if ll_keywords == [] and query_param.mode in ["local", "hybrid", "mix"]:
+            logger.warning("low_level_keywords is empty")
+        if hl_keywords == [] and query_param.mode in ["global", "hybrid", "mix"]:
+            logger.warning("high_level_keywords is empty")
+        if hl_keywords == [] and ll_keywords == []:
+            if len(query) < 50:
+                logger.warning(f"Forced low_level_keywords to origin query: {query}")
+                ll_keywords = [query]
+            else:
+                return QueryResult(content=PROMPTS["fail_response"], query=query)
+
+        ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
+        hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+
+        # Build query context (unified interface)
+        context_result = await _build_query_context(
+            query,
+            ll_keywords_str,
+            hl_keywords_str,
+            knowledge_graph_inst,
+            entities_vdb,
+            relationships_vdb,
+            text_chunks_db,
+            query_param,
+            tokenizer,
+            kg_chunk_pick_method,
+            max_related_chunks,
+            max_total_tokens,
+            system_prompt_template,
+            chunks_vdb,
+            retrieval=retrieval,
+            llm_model_func=use_model_func,
+        )
 
     if context_result is None:
         logger.info("[kg_query] No query context could be built; returning no-result.")
