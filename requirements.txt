@@ -37,3 +37,4 @@ dill
 
 langchain-openai
 json_repair
+rank_bm25

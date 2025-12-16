@@ -3,6 +3,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Set
+import numpy as np
+from rank_bm25 import BM25Okapi
 
 from easy_knowledge_retriever.kg.base import QueryParam, QueryContextResult
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
@@ -38,6 +40,10 @@ class HybridMixRetrieval(BaseRetrieval):
 
     hl_keywords: list[str] = field(default_factory=list)
     ll_keywords: list[str] = field(default_factory=list)
+
+    # BM25 Cache
+    bm25_index: Any = None
+    corpus_chunks: List[Dict[str, Any]] = field(default_factory=list)
 
     def _create_query_param(self) -> QueryParam:
         return QueryParam(
@@ -156,80 +162,46 @@ class HybridMixRetrieval(BaseRetrieval):
         top_k: int
     ) -> List[Dict[str, Any]]:
         """
-        Implement a simple in-memory BM25 search.
-        NOTE: This iterates over ALL chunks in the DB, which might be slow for large datasets.
+        Implement a simple in-memory BM25 search using rank_bm25.
+        Optimized to cache index.
         """
         if not chunks_vdb:
             return []
 
-        # Get all data from storage
-        # Depending on implementation, we might need to access the underlying client storage
-        try:
-            storage = await chunks_vdb.client_storage
-            all_data = storage.get("data", [])
-        except Exception as e:
-            logger.warning(f"Could not access internal storage for BM25: {e}")
-            return []
+        # 1. Initialize index if not exists
+        if not self.bm25_index:
+            try:
+                storage = await chunks_vdb.client_storage
+                all_data = storage.get("data", [])
+            except Exception as e:
+                logger.warning(f"Could not access internal storage for BM25: {e}")
+                return []
             
-        if not all_data:
-            return []
+            if not all_data:
+                return []
+                
+            tokenized_corpus = [simple_tokenize(doc.get("content", "")) for doc in all_data]
+            self.bm25_index = BM25Okapi(tokenized_corpus)
+            self.corpus_chunks = all_data
 
-        # Simple BM25 Implementation
-        query_tokens = simple_tokenize(query)
-        if not query_tokens:
+        # 2. Query the optimized index
+        tokenized_query = simple_tokenize(query)
+        if not tokenized_query:
             return []
-
-        # Precompute corpus stats
-        corpus_size = len(all_data)
-        avgdl = 0
-        doc_freqs = Counter()
-        
-        # We need to tokenize all docs. 
-        # For performance in a real system, this should be pre-indexed.
-        # Here we do it on the fly as per constraints.
-        tokenized_corpus = []
-        for doc in all_data:
-            content = doc.get("content", "")
-            tokens = simple_tokenize(content)
-            tokenized_corpus.append((doc, tokens))
-            avgdl += len(tokens)
             
-            # Update doc freqs for query terms
-            unique_tokens = set(tokens)
-            for token in query_tokens:
-                if token in unique_tokens:
-                    doc_freqs[token] += 1
-                    
-        avgdl /= corpus_size if corpus_size > 0 else 1
+        doc_scores = self.bm25_index.get_scores(tokenized_query)
         
-        scores = []
-        
-        for doc, tokens in tokenized_corpus:
-            score = 0
-            doc_len = len(tokens)
-            doc_counter = Counter(tokens)
-            
-            for token in query_tokens:
-                f = doc_counter[token]
-                if f == 0:
-                    continue
-                
-                n_q = doc_freqs[token]
-                idf = math.log(1 + (corpus_size - n_q + 0.5) / (n_q + 0.5))
-                
-                term_score = idf * (f * (self.k1 + 1)) / (f + self.k1 * (1 - self.b + self.b * (doc_len / avgdl)))
-                score += term_score
-            
-            if score > 0:
-                scores.append((score, doc))
-                
-        # Sort by score desc
-        scores.sort(key=lambda x: x[0], reverse=True)
-        
-        top_results = scores[:top_k]
+        # 3. Sort and get Top K
+        # np.argsort returns indices that would sort the array
+        top_indices = np.argsort(doc_scores)[::-1][:top_k]
         
         valid_chunks = []
-        for score, result in top_results:
+        for idx in top_indices:
+            score = doc_scores[idx]
+            if score <= 0:
+                continue
+            
+            result = self.corpus_chunks[idx]
             chunk_with_metadata = {
                 "content": result.get("content", ""),
                 "created_at": result.get("__created_at__", None), # NanoDB internal key
@@ -237,7 +209,7 @@ class HybridMixRetrieval(BaseRetrieval):
                 "source_type": "bm25",
                 "chunk_id": result.get("__id__"), # NanoDB internal key
                 "id": result.get("__id__"),
-                "score": score
+                "score": float(score)
             }
             valid_chunks.append(chunk_with_metadata)
             
