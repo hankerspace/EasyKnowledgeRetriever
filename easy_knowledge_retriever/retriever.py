@@ -2930,6 +2930,11 @@ class EasyKnowledgeRetriever:
                 )
 
             user_prompt = query + (f"\n\n{param.user_prompt}" if param.user_prompt else "")
+            
+            # Add citation suffix defined in prompts
+            if "citation_suffix" in PROMPTS:
+                user_prompt += f"\n\n{PROMPTS['citation_suffix']}"
+
             response_type = (
                 param.response_type
                 if param.response_type

@@ -266,6 +266,9 @@ Consider the conversation history if provided to maintain conversational flow an
 
 {context_data}
 """
+PROMPTS["citation_suffix"] = """
+Every response should be justified by indicating the reference documents and page numbers at the end of the sentence or paragraph. Each document/page pair should be indicated in brackets, for example [1, page 2].
+"""
 
 PROMPTS["naive_rag_response"] = """---Role---
 
