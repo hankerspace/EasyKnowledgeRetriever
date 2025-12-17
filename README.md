@@ -16,6 +16,7 @@
 
 - **Multimodal Ingestion**: Parse & ingest PDF data containing images, tables, equations, ... Based on MinerU.
 - **Hybrid Retrieval**: Combines vector similarity search with knowledge graph exploration for more context-aware answers.
+- **Smart Graph Re-ranking**: Uses local centrality algorithms (PageRank) to filter and prioritize the most semantically relevant graph edges for the user query.
 - **Knowledge Graph Integration**: Automatically extracts entities and relationships from your text documents.
 - **Modular Storage**: Supports various backends for Key-Value pairs, Vector Stores, and Graph Storage (e.g., JSON, NanoVectorDB, NetworkX, Neo4j, Milvus).
 - **LLM Agnostic**: Designed to work with OpenAI-compatible LLM APIs (OpenAI, Gemini via OpenAI adapter, etc.).

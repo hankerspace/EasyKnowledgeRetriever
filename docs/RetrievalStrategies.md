@@ -31,7 +31,11 @@ Focuses on specific entities mentioned in the query.
 1.  **Keyword Extraction**: LLM extracts "Low-Level" keywords (entities) from the query.
 2.  **Entity Lookup**: System looks up these entities in the Knowledge Graph.
 3.  **Neighbor Retrieval**: Retrieves direct neighbors (relations) of these entities.
-4.  **Context Building**: Constructs a context description from the matched entities and their relations.
+4.  **Semantic Edge Filtering**: Applies a **Smart Re-ranking** strategy to filter edges.
+    *   Constructs a local induced subgraph of retrieved entities.
+    *   Calculates local centrality (PageRank) to find structurally important nodes relative to the query anchors.
+    *   Prioritizes edges that connect important nodes or link two query entities directly.
+5.  **Context Building**: Constructs a context description from the matched entities and their filtered relations.
 
 ### 3. Global Retrieval (`global`)
 **Type**: Graph Retrieval (Relation-Centric)
