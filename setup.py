@@ -18,7 +18,7 @@ def parse_requirements(filename):
 
 setup(
     name="easy-knowledge-retriever",
-    version="1.2.2",
+    version="1.2.3",
     description="A simple and efficient RAG (Retrieval-Augmented Generation) library with Knowledge Graph support.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
