@@ -34,8 +34,8 @@ from .client import create_openai_async_client
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
+    stop=stop_after_attempt(20),
+    wait=wait_exponential(multiplier=1, min=4, max=120),
     retry=(
         retry_if_exception_type(RateLimitError)
         | retry_if_exception_type(APIConnectionError)
@@ -530,8 +530,8 @@ async def gpt_4o_mini_complete(
 
 @wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(20),
+    wait=wait_exponential(multiplier=1, min=4, max=120),
     retry=(
         retry_if_exception_type(RateLimitError)
         | retry_if_exception_type(APIConnectionError)
