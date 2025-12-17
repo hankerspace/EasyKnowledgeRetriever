@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, List, Tuple
 
+import networkx as nx
+
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.kv_storage.base import BaseKVStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
@@ -168,9 +170,51 @@ async def find_most_related_edges_from_entities(
             }
             all_edges_data.append(combined)
 
-    all_edges_data = sorted(
-        all_edges_data, key=lambda x: (x["rank"], x["weight"]), reverse=True
-    )
+    # 1. Build a local graph with retrieved node_datas
+    G = nx.Graph()
+
+    # Add nodes and their initial scores (from vector search)
+    anchor_nodes = set()
+    for node in node_datas:
+        name = node["entity_name"]
+        anchor_nodes.add(name)
+        G.add_node(name, initial_score=node.get("score", 1.0))
+
+    # Add all retrieved edges
+    for edge_data in all_edges_data:
+        src = edge_data.get("src_tgt", [None, None])[0]
+        tgt = edge_data.get("src_tgt", [None, None])[1]
+        if src and tgt:
+            G.add_edge(src, tgt, weight=edge_data.get("weight", 1.0), data=edge_data)
+
+    # 2. Calculate LOCAL structural importance
+    # Favor nodes that connect our vector entities together
+    # If graph is too small, PageRank might fail, fallback to degree
+    if len(G.nodes) > 0:
+        # Preferential attachment to anchors
+        personalization = {n: (10.0 if n in anchor_nodes else 1.0) for n in G.nodes()}
+        try:
+            centrality = nx.pagerank(G, personalization=personalization, weight='weight')
+        except:
+            centrality = nx.degree_centrality(G)
+
+        # 3. Re-assign score to edges based on importance of connected nodes
+        for edge_data in all_edges_data:
+            src = edge_data.get("src_tgt", [None, None])[0]
+            tgt = edge_data.get("src_tgt", [None, None])[1]
+
+            score_src = centrality.get(src, 0)
+            score_tgt = centrality.get(tgt, 0)
+
+            # New rank is the average importance of the two connected nodes
+            # + a bonus if both nodes are vector anchors
+            bonus = 2.0 if (src in anchor_nodes and tgt in anchor_nodes) else 1.0
+            edge_data["smart_rank"] = (score_src + score_tgt) * bonus
+
+        # 4. Sort by this new "smart_rank" instead of global degree
+        all_edges_data = sorted(
+            all_edges_data, key=lambda x: x.get("smart_rank", 0), reverse=True
+        )
 
     return all_edges_data
 
