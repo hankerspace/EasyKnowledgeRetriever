@@ -2943,6 +2943,9 @@ class EasyKnowledgeRetriever:
                 user_prompt=user_prompt,
                 context_data=query_context_result.context,
             )
+
+            # Append query to the end of system prompt
+            sys_prompt += f"\n\nUser Query: {query}"
             
             if param.only_need_prompt:
                  return QueryResult(
@@ -2953,7 +2956,7 @@ class EasyKnowledgeRetriever:
                      metadata=query_context_result.raw_data.get("metadata", {}),
                      query=query,
                      system_prompt=sys_prompt,
-                     user_prompt=param.user_prompt or "",
+                     user_prompt=user_prompt,
                      **parsed_data
                  )
 
@@ -2989,7 +2992,7 @@ class EasyKnowledgeRetriever:
                 },
                 query=query,
                 system_prompt=sys_prompt,
-                user_prompt=param.user_prompt or "",
+                user_prompt=user_prompt,
                 **parsed_data
             )
             
