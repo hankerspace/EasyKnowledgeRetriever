@@ -21,6 +21,7 @@ from easy_knowledge_retriever.utils.logger import logger
 from .types import GPTKeywordExtractionFormat
 
 import numpy as np
+from easy_knowledge_retriever.constants import DEFAULT_EMBEDDING_ENCODING_FORMAT
 import base64
 from typing import Any, Union
 
@@ -622,7 +623,7 @@ async def openai_embed(
             api_params = {
                 "model": api_model,
                 "input": batch_texts,
-                "encoding_format": "base64",
+                "encoding_format": DEFAULT_EMBEDDING_ENCODING_FORMAT,
             }
 
             # Add dimensions parameter only if embedding_dim is provided

@@ -114,6 +114,15 @@ DEFAULT_EMBEDDING_BATCH_NUM = _env_int("EKR_EMBEDDING_BATCH_NUM", 16, minimum=1)
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = _env_int("EKR_EMBEDDING_MAX_ASYNC", 1, minimum=1)
 DEFAULT_EMBEDDING_TIMEOUT = _env_int("EKR_EMBEDDING_TIMEOUT", 60, minimum=1)
 
+# Wire format for embedding responses. OpenAI itself is fastest with base64,
+# but OpenAI-*compatible* gateways often accept only "float" and reject
+# base64 with a 422 -- so this has to be switchable per deployment.
+DEFAULT_EMBEDDING_ENCODING_FORMAT = os.environ.get(
+    "EKR_EMBEDDING_ENCODING_FORMAT", "base64"
+).strip().lower()
+if DEFAULT_EMBEDDING_ENCODING_FORMAT not in ("base64", "float"):
+    DEFAULT_EMBEDDING_ENCODING_FORMAT = "base64"
+
 # MinerU PDF parsing: hard ceiling on the parser subprocess, so a hung parse
 # fails the ingestion instead of hanging it forever.
 DEFAULT_MINERU_TIMEOUT = _env_int("EKR_MINERU_TIMEOUT", 3600, minimum=1)

@@ -42,7 +42,7 @@ EXTRAS["all"] = sorted({dep for deps in EXTRAS.values() for dep in deps})
 
 setup(
     name="easy-knowledge-retriever",
-    version="1.2.5",
+    version="1.3.0",
     description="A simple and efficient RAG (Retrieval-Augmented Generation) library with Knowledge Graph support.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",

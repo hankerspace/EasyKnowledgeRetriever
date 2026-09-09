@@ -39,6 +39,25 @@ def test_env_tunable_concurrency():
     del os.environ["EKR__TMP"]
 
 
+def test_embedding_encoding_format_is_switchable():
+    """OpenAI-compatible gateways often reject base64 with a 422."""
+    import importlib
+    from easy_knowledge_retriever import constants
+
+    assert constants.DEFAULT_EMBEDDING_ENCODING_FORMAT == "base64", "default must not change"
+
+    os.environ["EKR_EMBEDDING_ENCODING_FORMAT"] = "float"
+    try:
+        c = importlib.reload(constants)
+        assert c.DEFAULT_EMBEDDING_ENCODING_FORMAT == "float"
+        os.environ["EKR_EMBEDDING_ENCODING_FORMAT"] = "nonsense"
+        c = importlib.reload(constants)
+        assert c.DEFAULT_EMBEDDING_ENCODING_FORMAT == "base64", "bad value must fall back"
+    finally:
+        del os.environ["EKR_EMBEDDING_ENCODING_FORMAT"]
+        importlib.reload(constants)
+
+
 def test_read_text_document_shape():
     """Text files must produce the same structure MinerU yields."""
     from easy_knowledge_retriever.retriever import read_text_document
