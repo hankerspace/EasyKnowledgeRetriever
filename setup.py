@@ -24,7 +24,10 @@ def parse_requirements(filename):
 EXTRAS = {
     # MinerU-based PDF parsing (layout, tables, formulas, images).
     "pdf": [
-        "mineru>=2.0",
+        # NOT bare "mineru": its default hybrid backend refuses to run without
+        # the local pipeline dependencies and fails at parse time with
+        # HybridDependencyError. [core] pulls them in.
+        "mineru[core]>=2.0",
         "torch>=2.2",
         "dill>=0.3.8",
         "doclayout_yolo>=0.0.3",
@@ -42,7 +45,7 @@ EXTRAS["all"] = sorted({dep for deps in EXTRAS.values() for dep in deps})
 
 setup(
     name="easy-knowledge-retriever",
-    version="1.3.0",
+    version="1.3.1",
     description="A simple and efficient RAG (Retrieval-Augmented Generation) library with Knowledge Graph support.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",

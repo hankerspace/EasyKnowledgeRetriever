@@ -48,7 +48,13 @@ pip install "easy-knowledge-retriever[pdf,eval]" # + evaluation harness
 pip install "easy-knowledge-retriever[all]"      # everything
 ```
 
-> **Note on `[pdf]`**: MinerU downloads its layout/OCR/formula models on first
+> **Note on `[pdf]`**: it installs `mineru[core]`, not bare `mineru` -- the
+> default backend refuses to run without the local pipeline dependencies. It
+> also needs OpenCV's system libraries (`libgl1`, `libglib2.0-0`, `libxcb1`,
+> `libsm6`, `libxext6`, `libxrender1`), which slim base images omit, and a
+> `torch`/`torchvision` pair from the same wheel index.
+>
+> MinerU downloads its layout/OCR/formula models on first
 > use (several GB). Pre-warm them at Docker build time and persist the cache
 > (`HF_HOME`), or the first ingestion will stall on the download.
 
