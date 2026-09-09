@@ -135,6 +135,29 @@ from easy_knowledge_retriever.utils.text_utils import sanitize_text_for_encoding
 from easy_knowledge_retriever.kg.types import KnowledgeGraph
 
 
+# --- Ingestion file-type support -----------------------------------------
+# PDFs need MinerU (layout, tables, images). Text-like files are read straight
+# through: routing them into MinerU would just fail.
+PDF_INGEST_SUFFIXES = frozenset({".pdf"})
+TEXT_INGEST_SUFFIXES = frozenset({".txt", ".md", ".markdown"})
+SUPPORTED_INGEST_SUFFIXES = PDF_INGEST_SUFFIXES | TEXT_INGEST_SUFFIXES
+
+
+def read_text_document(file_path: str) -> dict:
+    """Read a text/markdown file into the same structure MinerU produces.
+
+    One page, no images, so the rest of the ingestion pipeline (dedup,
+    chunking, citations) is identical to the PDF path. Blocking I/O -- call it
+    via asyncio.to_thread from async code.
+    """
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    return {
+        "content": content,
+        "pages": [{"content": content, "images": [], "page_number": 1}],
+        "images": [],
+    }
+
 
 @final
 @dataclass
@@ -1108,53 +1131,78 @@ class EasyKnowledgeRetriever:
         )
     async def ingest(self, file_path: str, start_page: Optional[int] = None, end_page: Optional[int] = None) -> Dict[str, Any]:
         """
-        Ingest a document using Mineru parser.
+        Ingest a document, dispatching on file type.
+
+        PDFs go through the MinerU parser (layout, tables, images). Plain text
+        and Markdown are read directly -- running them through MinerU would only
+        fail. Any other extension raises, rather than failing obscurely deep in
+        the parser.
 
         Args:
-            file_path: Path to the document file (PDF).
-            start_page: Optional start page index (0-based).
-            end_page: Optional end page index (0-based) or count.
+            file_path: Path to the document file (.pdf, .txt, .md, .markdown).
+            start_page: Optional start page index (0-based). PDF only.
+            end_page: Optional end page index (0-based) or count. PDF only.
             
         Returns:
             The parsed data structure.
         """
         import os
+        import pathlib as _pathlib
         from easy_knowledge_retriever.operations.mineru_parser import MineruParser
         from easy_knowledge_retriever.operations.image_processing import ImageSummarizer
+
+        suffix = _pathlib.Path(file_path).suffix.lower()
+        if suffix not in SUPPORTED_INGEST_SUFFIXES:
+            raise ValueError(
+                f"Unsupported file type '{suffix}' for {file_path}. "
+                f"Supported: {', '.join(sorted(SUPPORTED_INGEST_SUFFIXES))}."
+            )
 
         # Use a subdirectory in working_dir for parsed docs
         parsed_docs_dir = os.path.join(self.working_dir, "parsed_docs")
         if not os.path.exists(parsed_docs_dir):
             os.makedirs(parsed_docs_dir)
 
-        parser = MineruParser(output_dir=parsed_docs_dir)
+        parser = MineruParser(output_dir=parsed_docs_dir) if suffix in PDF_INGEST_SUFFIXES else None
         try:
-            # Check if document has already been parsed.
-            # Mineru creates a directory structure: working_dir / file_stem / 'auto' / file_stem_content_list.json
-            import pathlib
-            file_path_obj = pathlib.Path(file_path)
-            file_stem = file_path_obj.stem
-            expected_output_json = pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json"
+            if parser is None:
+                # Text-like document: read it as a single page and reuse the
+                # exact same downstream path (dedup, chunking, citations).
+                parsed_data = await asyncio.to_thread(read_text_document, file_path)
+            else:
+                # Check if document has already been parsed.
+                # Mineru creates a directory structure: working_dir / file_stem / 'auto' / file_stem_content_list.json
+                import pathlib
+                file_path_obj = pathlib.Path(file_path)
+                file_stem = file_path_obj.stem
+                expected_output_json = pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json"
             
-            parsed_data = None
-            if expected_output_json.exists():
-                print(f"Document already parsed: {file_path}. Loading existing data...")
-                # We need to reuse the parser's logic to process the content list, 
-                # but parser.parse runs the command. 
-                # Let's extract the loading logic or just use a helper method.
-                # Accessing private method _process_content_list is acceptable here as they are in same package/ownership.
-                try:
-                    import json
-                    with open(expected_output_json, "r", encoding="utf-8") as f:
-                        content_list = json.load(f)
-                    parsed_data = parser._process_content_list(content_list, expected_output_json.parent)
-                    print("Loaded existing parsed data.")
-                except Exception as e:
-                    print(f"Failed to load existing parsed data, re-parsing: {e}")
+                parsed_data = None
+                if expected_output_json.exists():
+                    print(f"Document already parsed: {file_path}. Loading existing data...")
+                    # We need to reuse the parser's logic to process the content list, 
+                    # but parser.parse runs the command. 
+                    # Let's extract the loading logic or just use a helper method.
+                    # Accessing private method _process_content_list is acceptable here as they are in same package/ownership.
+                    try:
+                        import json
+                        with open(expected_output_json, "r", encoding="utf-8") as f:
+                            content_list = json.load(f)
+                        parsed_data = await asyncio.to_thread(
+                            parser._process_content_list, content_list, expected_output_json.parent
+                        )
+                        print("Loaded existing parsed data.")
+                    except Exception as e:
+                        print(f"Failed to load existing parsed data, re-parsing: {e}")
             
-            if parsed_data is None:
-                print(f"Parsing document: {file_path}...")
-                parsed_data = parser.parse(file_path, start_page=start_page, end_page=end_page)
+                if parsed_data is None:
+                    print(f"Parsing document: {file_path}...")
+                    # parser.parse() shells out to MinerU and blocks for minutes.
+                    # Run it off the event loop, otherwise the whole ASGI app
+                    # (health checks included) freezes for the duration.
+                    parsed_data = await asyncio.to_thread(
+                        parser.parse, file_path, start_page=start_page, end_page=end_page
+                    )
 
             # Calculate a stable ID based on the original text content (before image summarization)
             # This ensures that even if image summaries change (LLM non-determinism),

@@ -24,11 +24,48 @@
 
 ## Installation
 
-You can install the library via pip:
+The base install is deliberately light -- it only pulls what is needed to build
+and query a NetworkX + NanoVectorDB + JsonKV pipeline:
 
 ```bash
 pip install easy-knowledge-retriever
 ```
+
+Everything else is an optional extra, so you only pay for what you use:
+
+| Extra | Installs | Needed for |
+|---|---|---|
+| `[pdf]` | mineru, torch, dill, doclayout_yolo | PDF ingestion via MinerU (**several GB** -- see note below) |
+| `[milvus]` | pymilvus | Milvus vector storage |
+| `[neo4j]` | neo4j, pipmaster | Neo4j graph storage |
+| `[postgres]` | asyncpg | PostgreSQL KV / vector / graph storage |
+| `[cjk]` | pypinyin | Chinese pinyin sorting (falls back to plain sort) |
+| `[eval]` | ragas, datasets, langchain-openai | the RAGAS harness under `evaluation/` |
+
+```bash
+pip install "easy-knowledge-retriever[pdf]"      # typical RAG-over-PDF setup
+pip install "easy-knowledge-retriever[pdf,eval]" # + evaluation harness
+pip install "easy-knowledge-retriever[all]"      # everything
+```
+
+> **Note on `[pdf]`**: MinerU downloads its layout/OCR/formula models on first
+> use (several GB). Pre-warm them at Docker build time and persist the cache
+> (`HF_HOME`), or the first ingestion will stall on the download.
+
+### Tuning concurrency
+
+By default every LLM and embedding call is serialized (`= 1`), which is safe but
+very slow on a large corpus. Raise it to match your provider's rate limits:
+
+```bash
+export EKR_MAX_ASYNC=8            # concurrent LLM calls (entity extraction)
+export EKR_EMBEDDING_MAX_ASYNC=4  # concurrent embedding calls
+export EKR_EMBEDDING_BATCH_NUM=32 # texts per embedding request
+export EKR_LLM_TIMEOUT=120        # seconds
+export EKR_MINERU_TIMEOUT=3600    # max seconds for one PDF parse
+```
+
+An invalid value falls back to the default rather than breaking the import.
 
 ## Quick Start
 
@@ -247,8 +284,7 @@ For a complete, up-to-date list of all services (LLM, Vector/KV/Graph/Doc Status
 To set up the project for development:
 
 1.  Clone the repository.
-2.  Install dependencies: `pip install -r requirements.txt`.
-3.  Install the package in editable mode: `pip install -e .`.
+2.  Install the package in editable mode with the extras you need: `pip install -e ".[pdf,eval]"`.
 
 ### Running Tests
 

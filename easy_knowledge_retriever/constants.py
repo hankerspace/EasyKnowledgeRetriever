@@ -6,6 +6,25 @@ different parts of the EasyKnowledgeRetriever system. Centralizing these values 
 consistency and makes maintenance easier.
 """
 
+import os
+
+
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    """Read a positive int from the environment, falling back to `default`.
+
+    Invalid or out-of-range values fall back rather than raising: a typo in a
+    deployment env var should not prevent the library from importing.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= minimum else default
+
+
 # Default values for server settings
 DEFAULT_MAX_GRAPH_NODES = 1000
 
@@ -80,14 +99,24 @@ DEFAULT_LOG_FILENAME = "easy_knowledge_retriever.log"  # Default log filename
 
 
 # LLM execution defaults
+#
+# Concurrency is env-tunable because the right value depends entirely on the
+# provider's rate limits, not on the code. The defaults stay conservative (1 =
+# fully serialized) so an unconfigured deployment cannot burn through a quota,
+# but ingestion of a large document is unusably slow at 1 -- raise
+# EKR_MAX_ASYNC / EKR_EMBEDDING_MAX_ASYNC once you know your limits.
 DEFAULT_TEMPERATURE = 1.0
-DEFAULT_MAX_ASYNC = 1
-DEFAULT_LLM_TIMEOUT = 60
+DEFAULT_MAX_ASYNC = _env_int("EKR_MAX_ASYNC", 1, minimum=1)
+DEFAULT_LLM_TIMEOUT = _env_int("EKR_LLM_TIMEOUT", 60, minimum=1)
 
 # Embedding execution defaults
-DEFAULT_EMBEDDING_BATCH_NUM = 16
-DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 1
-DEFAULT_EMBEDDING_TIMEOUT = 60
+DEFAULT_EMBEDDING_BATCH_NUM = _env_int("EKR_EMBEDDING_BATCH_NUM", 16, minimum=1)
+DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = _env_int("EKR_EMBEDDING_MAX_ASYNC", 1, minimum=1)
+DEFAULT_EMBEDDING_TIMEOUT = _env_int("EKR_EMBEDDING_TIMEOUT", 60, minimum=1)
+
+# MinerU PDF parsing: hard ceiling on the parser subprocess, so a hung parse
+# fails the ingestion instead of hanging it forever.
+DEFAULT_MINERU_TIMEOUT = _env_int("EKR_MINERU_TIMEOUT", 3600, minimum=1)
 
 # Default values for retrieval settings
 DEFAULT_RELATED_CHUNK_NUMBER = 5

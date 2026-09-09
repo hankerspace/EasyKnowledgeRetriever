@@ -3,3 +3,16 @@ example/pdf/**
 .idea
 .junie
 
+# Python build / cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Local env & secrets
+.env
+.env.*
+!.env.example

@@ -7,20 +7,25 @@ import tempfile
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
+from easy_knowledge_retriever.constants import DEFAULT_MINERU_TIMEOUT
+
 class MineruParser:
     """
     Parser for PDF documents using Mineru (Magic-PDF) CLI.
     """
 
-    def __init__(self, output_dir: Optional[str] = None):
+    def __init__(self, output_dir: Optional[str] = None, timeout: Optional[int] = None):
         """
         Initialize the parser.
         
         Args:
             output_dir: Optional directory to store parsed outputs. 
                         If None, a temporary directory is used.
+            timeout: Max seconds the MinerU subprocess may run before the parse
+                     is aborted. Defaults to EKR_MINERU_TIMEOUT (1h).
         """
         self.output_dir = output_dir
+        self.timeout = timeout if timeout is not None else DEFAULT_MINERU_TIMEOUT
 
     def parse(self, file_path: str, start_page: Optional[int] = None, end_page: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -72,8 +77,18 @@ class MineruParser:
 
             
             print(f"Running Mineru: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
+            # A hung MinerU run must fail the ingestion, not hang it forever.
+            # Tune with EKR_MINERU_TIMEOUT (seconds).
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=self.timeout
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"Mineru timed out after {self.timeout}s on {file_path_obj}. "
+                    f"Raise EKR_MINERU_TIMEOUT if the document is genuinely this large."
+                ) from exc
+
             if result.returncode != 0:
                 raise RuntimeError(f"Mineru failed: {result.stderr}\nStdout: {result.stdout}")
                 

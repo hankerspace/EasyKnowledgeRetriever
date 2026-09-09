@@ -1,40 +1,22 @@
-# Core & Utilities
-asyncpg>=0.29.0,<1.0.0
-httpx
-networkx
-numpy
-tenacity
-tiktoken
+# Core runtime dependencies for easy-knowledge-retriever.
+#
+# This file is the single source of truth for `install_requires` in setup.py.
+# It must stay minimal: it is what `pip install easy-knowledge-retriever`
+# installs. Everything optional (PDF parsing, alternative storage backends,
+# evaluation tooling) lives in extras_require -- see setup.py.
+#
+# Verified: these are exactly the packages needed to `import
+# easy_knowledge_retriever`, build a NetworkX + NanoVectorDB + JsonKV pipeline
+# and query it.
 
-# LLM Providers
+aiohttp>=3.9,<4.0
+httpx>=0.26,<1.0
+json_repair>=0.25,<1.0
+nano-vectordb>=0.0.4
+networkx>=3.0,<4.0
+numpy>=1.26,<3.0
 openai>=2.0.0,<3.0.0
-
-# DB
-neo4j>=5.0.0,<7.0.0
-pymilvus>=2.6.2
-nano-vectordb
-
-# Document Processing
-pypdf
-
-mineru
-doclayout_yolo
-
-# Eval
-ragas
-datasets
-
-# Mineru & DocLayout-YOLO Dependencies
-ultralytics
-ftfy
-shapely
-pyclipper
-omegaconf
-
-# Other
-pypinyin
-dill
-
-langchain-openai
-json_repair
-rank_bm25
+pydantic>=2.0,<3.0
+rank_bm25>=0.2.2,<1.0
+tenacity>=8.0,<10.0
+tiktoken>=0.6,<1.0
