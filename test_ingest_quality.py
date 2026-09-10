@@ -41,9 +41,14 @@ print("parse cache ok")
 from openai import InternalServerError
 from easy_knowledge_retriever.llm.openai import openai_complete_if_cache
 
-retried = set()
-for condition in openai_complete_if_cache.retry.retry.retries:
-    retried.update(getattr(condition, "exception_types", ()) if isinstance(getattr(condition, "exception_types", ()), tuple)
-                   else (condition.exception_types,))
+def _exception_types(condition):
+    """tenacity's `a | b` nests retry_any objects: walk them down to the exception types."""
+    for child in getattr(condition, "retries", ()):
+        yield from _exception_types(child)
+    types = getattr(condition, "exception_types", ())
+    yield from (types if isinstance(types, tuple) else (types,))
+
+
+retried = set(_exception_types(openai_complete_if_cache.retry.retry))
 assert InternalServerError in retried, retried
 print("llm retry ok")
