@@ -141,3 +141,34 @@ assert [c["chunk_id"] for c in pool] == ["c0", "c3", "c1", "c2", "c4"], pool  # 
 assert pool[2]["file_path"] == "doc.pdf" and tracking["c1"]["source"] == "N"
 assert asyncio.run(_add_neighbor_candidates(best, list(best), None)) == best
 print("neighbour candidates ok")
+
+# Naive with a reranker: dense search fetches twice chunk_top_k candidates and the reranker keeps the best chunk_top_k.
+from easy_knowledge_retriever.retrieval.naive import NaiveRetrieval
+
+
+class NaiveVDB:
+    cosine_better_than_threshold = 0.2
+
+    def __init__(self):
+        self.asked = []
+
+    async def query(self, query, top_k, query_embedding=None):
+        self.asked.append(top_k)
+        return [{"id": f"n{i}", "content": f"passage-{i}", "file_path": "doc.pdf"} for i in range(top_k)]
+
+
+class LastIsBestReranker:
+    async def rerank(self, query, documents, top_n=None):
+        return [{"index": i, "relevance_score": i / 100} for i in range(len(documents))]
+
+
+vdb = NaiveVDB()
+rag = SimpleNamespace(chunks_vdb=vdb, text_chunks=None, tokenizer=TiktokenTokenizer(), max_total_tokens=30000,
+                      chunk_entity_relation_graph=None, entities_vdb=None, relationships_vdb=None)
+res = asyncio.run(NaiveRetrieval(chunk_top_k=3, reranker_service=LastIsBestReranker()).retrieve("q", rag))
+assert vdb.asked == [6], vdb.asked
+assert "passage-5" in res.context and "passage-2" not in res.context, res.context
+vdb.asked.clear()
+res = asyncio.run(NaiveRetrieval(chunk_top_k=3).retrieve("q", rag))
+assert vdb.asked == [3] and "passage-2" in res.context
+print("naive candidate pool ok")
