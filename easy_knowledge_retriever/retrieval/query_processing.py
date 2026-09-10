@@ -1881,19 +1881,77 @@ def merge_query_results(results: list[QueryContextResult]) -> QueryContextResult
         "chunk_tracking": {},
         "metadata": {}
     }
-    
+    # User-facing data (QueryResult.chunks/references are built from it), de-duplicated.
+    chunks: dict = {}
+    entities: dict = {}
+    relationships: dict = {}
+    # Each sub-query numbers its references from "1", so ids collide: renumber by file_path.
+    ref_by_path: dict[str, str] = {}
+    keywords = {"high_level": [], "low_level": []}
+    processing_info: dict[str, Any] = {}
+    metadata = merged_raw_data["metadata"]
+
     for i, result in enumerate(results):
         if result.context:
             merged_context += f"\n--- Context for Sub-query {i+1} ---\n{result.context}\n"
-        
+
         # Merge raw data
         if result.raw_data:
             for key in ["local_entities", "local_relations", "global_entities", "global_relations", "vector_chunks"]:
                 if key in result.raw_data and isinstance(result.raw_data[key], list):
                     merged_raw_data[key].extend(result.raw_data[key])
-            
+
             # Merge chunk tracking
             if "chunk_tracking" in result.raw_data:
                 merged_raw_data["chunk_tracking"].update(result.raw_data["chunk_tracking"])
+
+        raw = result.raw_data or {}
+        for key in ("status", "message"):
+            if key in raw:
+                merged_raw_data.setdefault(key, raw[key])
+
+        data = raw.get("data") or {}
+        local_ref_ids = {}
+        for ref in data.get("references") or []:
+            path = ref.get("file_path")
+            if path:
+                new_id = ref_by_path.setdefault(path, str(len(ref_by_path) + 1))
+                local_ref_ids[str(ref.get("reference_id", ""))] = new_id
+
+        def _remap(item: dict) -> dict:
+            item = dict(item)
+            if item.get("reference_id"):
+                item["reference_id"] = local_ref_ids.get(str(item["reference_id"]), "")
+            return item
+
+        for c in data.get("chunks") or []:
+            chunks.setdefault(c.get("chunk_id") or c.get("content"), _remap(c))
+        for e in data.get("entities") or []:
+            entities.setdefault(e.get("entity_name"), _remap(e))
+        for r in data.get("relationships") or []:
+            relationships.setdefault((r.get("src_id"), r.get("tgt_id")), _remap(r))
+
+        meta = raw.get("metadata") or {}
+        if "query_mode" in meta:
+            metadata.setdefault("query_mode", meta["query_mode"])
+        for level, kws in keywords.items():
+            for kw in (meta.get("keywords") or {}).get(level) or []:
+                if kw not in kws:
+                    kws.append(kw)
+        for key, value in (meta.get("processing_info") or {}).items():
+            if isinstance(value, (int, float)):
+                processing_info[key] = processing_info.get(key, 0) + value
+
+    merged_raw_data["data"] = {
+        "entities": list(entities.values()),
+        "relationships": list(relationships.values()),
+        "chunks": list(chunks.values()),
+        "references": [{"reference_id": rid, "file_path": p} for p, rid in ref_by_path.items()],
+    }
+    metadata["keywords"] = keywords
+    # ponytail: counts are summed across sub-queries; only final_chunks_count reflects de-duplication
+    processing_info["final_chunks_count"] = len(chunks)
+    processing_info["sub_query_count"] = len(results)
+    metadata["processing_info"] = processing_info
 
     return QueryContextResult(context=merged_context, raw_data=merged_raw_data)

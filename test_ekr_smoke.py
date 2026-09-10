@@ -105,6 +105,49 @@ def test_mineru_subprocess_is_bounded():
         raise AssertionError("expected TimeoutExpired")
 
 
+def test_merge_query_results_keeps_chunks_and_references():
+    """Decomposed queries used to return chunks=[] because raw_data["data"] was dropped."""
+    from easy_knowledge_retriever.kg.base import QueryContextResult
+    from easy_knowledge_retriever.retrieval.query_processing import merge_query_results
+
+    def fake(chunks, refs, entities, hl):
+        return QueryContextResult(context="ctx", raw_data={
+            "status": "success",
+            "data": {"chunks": chunks, "references": refs, "entities": entities, "relationships": []},
+            "metadata": {"query_mode": "mix", "keywords": {"high_level": hl, "low_level": []},
+                         "processing_info": {"final_chunks_count": len(chunks)}},
+        })
+
+    a = fake(
+        [{"chunk_id": "c1", "reference_id": "1", "file_path": "a.pdf", "content": "x"},
+         {"chunk_id": "c2", "reference_id": "1", "file_path": "a.pdf", "content": "y"}],
+        [{"reference_id": "1", "file_path": "a.pdf"}],
+        [{"entity_name": "AI Act"}], ["risk"],
+    )
+    # Second sub-query numbers its own references: b.pdf is "1" here, a.pdf is "2".
+    b = fake(
+        [{"chunk_id": "c3", "reference_id": "1", "file_path": "b.pdf", "content": "z"},
+         {"chunk_id": "c2", "reference_id": "2", "file_path": "a.pdf", "content": "y"}],
+        [{"reference_id": "1", "file_path": "b.pdf"}, {"reference_id": "2", "file_path": "a.pdf"}],
+        [{"entity_name": "AI Act"}, {"entity_name": "GPAI"}], ["risk", "gpai"],
+    )
+
+    raw = merge_query_results([a, b]).raw_data
+    data = raw["data"]
+    assert [c["chunk_id"] for c in data["chunks"]] == ["c1", "c2", "c3"]
+    assert data["references"] == [
+        {"reference_id": "1", "file_path": "a.pdf"},
+        {"reference_id": "2", "file_path": "b.pdf"},
+    ]
+    refs = {r["reference_id"]: r["file_path"] for r in data["references"]}
+    assert all(refs[c["reference_id"]] == c["file_path"] for c in data["chunks"])
+    assert [e["entity_name"] for e in data["entities"]] == ["AI Act", "GPAI"]
+    assert raw["metadata"]["query_mode"] == "mix"
+    assert raw["metadata"]["keywords"]["high_level"] == ["risk", "gpai"]
+    assert raw["metadata"]["processing_info"]["final_chunks_count"] == 3
+    assert raw["status"] == "success"
+
+
 def test_naive_retrieval_carries_page_from_text_chunks():
     """The chunks vdb has no page metadata: without the text chunk store lookup the LLM invents pages."""
     import json
