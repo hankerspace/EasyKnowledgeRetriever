@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ssl
+
 import aiohttp
 from typing import Any, List, Dict, Optional
 from tenacity import (
@@ -10,6 +12,16 @@ from tenacity import (
 )
 from easy_knowledge_retriever.utils.logger import logger
 from .utils import chunk_documents_for_rerank, aggregate_chunk_scores
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """CA bundle from certifi when installed (as openai/httpx do): aiohttp otherwise relies on the
+    system store, which is empty on python.org macOS builds and fails every HTTPS rerank call."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def build_rerank_payload(model: str, query: str, documents: List[str], top_n: Optional[int] = None,
@@ -101,7 +113,7 @@ async def generic_rerank_api(
         f"Rerank request: {len(documents)} documents, model: {model}, format: {response_format}"
     )
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_ssl_context())) as session:
         async with session.post(base_url, headers=headers, json=payload) as response:
             if response.status != 200:
                 error_text = await response.text()
