@@ -730,23 +730,21 @@ async def _apply_token_truncation(
     }
 
 
-NEIGHBOR_TOP = 5  # best reranked chunks whose continuation is offered to the reranker
-NEIGHBOR_SPAN = 2  # following chunks considered for each of them
+NEIGHBOR_TOP = 5  # best first-stage (dense + BM25) chunks whose continuation joins the rerank pool
+NEIGHBOR_SPAN = 2  # following chunks added for each of them
 
 
-async def _add_reranked_neighbors(
-    query: str,
-    chunks: list[dict],
+async def _add_neighbor_candidates(
+    anchors: list[dict],
+    merged_chunks: list[dict],
     text_chunks_db: BaseKVStorage | None,
-    reranker_service: BaseRerankerService,
-    query_param: QueryParam,
     chunk_tracking: dict | None = None,
 ) -> list[dict]:
-    """A list or an article often runs over the next chunks (a whole annex spans several): score the
-    chunks that follow the best hits and keep them only where they outrank the current tail."""
+    """A list or an article often runs over the next chunks (a whole annex spans several): the chunks that
+    follow the best first-stage hits join the rerank pool, where they win a place only if relevant."""
     data = getattr(text_chunks_db, "_data", None)
-    if not data or not chunks or chunks[0].get("rerank_score") is None:
-        return chunks
+    if not data or not anchors:
+        return merged_chunks
     # ponytail: position index rebuilt in O(corpus) when the chunk count changes; store it at ingestion for huge corpora
     cached = getattr(text_chunks_db, "_position_index", None)
     if cached is None or cached[0] != len(data):
@@ -754,9 +752,9 @@ async def _add_reranked_neighbors(
         text_chunks_db._position_index = cached
     positions = cached[1]
 
-    seen = {c.get("chunk_id") for c in chunks}
+    seen = {c.get("chunk_id") for c in merged_chunks}
     wanted = []
-    for chunk in chunks[:NEIGHBOR_TOP]:
+    for chunk in anchors:
         full = data.get(chunk.get("chunk_id")) or {}
         if full.get("chunk_order_index") is None:
             continue
@@ -766,31 +764,18 @@ async def _add_reranked_neighbors(
                 seen.add(cid)
                 wanted.append(cid)
     if not wanted:
-        return chunks
+        return merged_chunks
 
     neighbors = [
         dict(d, chunk_id=cid, source_type="neighbor")
         for cid, d in zip(wanted, await text_chunks_db.get_by_ids(wanted))
         if d and "content" in d
     ]
-    try:
-        scores = await reranker_service.rerank(query, [rerank_text(n) for n in neighbors])
-    except Exception as e:
-        logger.warning(f"Neighbour reranking failed, keeping the first ranking: {e}")
-        return chunks
-    for r in scores:
-        if 0 <= r.get("index", -1) < len(neighbors):
-            neighbors[r["index"]]["rerank_score"] = r.get("relevance_score")
-
-    pool = chunks + [n for n in neighbors if n.get("rerank_score") is not None]
-    pool.sort(key=lambda c: c.get("rerank_score") or 0, reverse=True)
-    kept = pool[: query_param.chunk_top_k or len(pool)]
-    added = [c for c in kept if c.get("source_type") == "neighbor"]
     if chunk_tracking is not None:
-        for c in added:
-            chunk_tracking.setdefault(c["chunk_id"], {"source": "N", "frequency": 1, "order": kept.index(c) + 1})
-    logger.info(f"Neighbour chunks: scored {len(neighbors)}, kept {len(added)}")
-    return kept
+        for i, c in enumerate(neighbors):
+            chunk_tracking.setdefault(c["chunk_id"], {"source": "N", "frequency": 1, "order": len(merged_chunks) + i + 1})
+    logger.info(f"Neighbour candidates added to the rerank pool: {len(neighbors)}")
+    return merged_chunks + neighbors
 
 
 async def _merge_all_chunks(
@@ -895,6 +880,9 @@ async def _merge_all_chunks(
         # We can pass a large limit to avoid truncation here, or pass the actual limit.
         # QueryParam has max_total_tokens.
         
+        merged_chunks = await _add_neighbor_candidates(
+            vector_chunks[:NEIGHBOR_TOP], merged_chunks, text_chunks_db, chunk_tracking
+        )
         # Reuse process_retrieved_chunks for reranking
         max_tokens = query_param.max_total_tokens or 30000 # fallback
         merged_chunks = await process_retrieved_chunks(
@@ -903,9 +891,6 @@ async def _merge_all_chunks(
             query_param=query_param,
             chunk_token_limit=max_tokens,
             reranker_service=reranker_service
-        )
-        merged_chunks = await _add_reranked_neighbors(
-            query, merged_chunks, text_chunks_db, reranker_service, query_param, chunk_tracking
         )
 
     return merged_chunks
