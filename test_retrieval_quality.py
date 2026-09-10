@@ -41,6 +41,16 @@ assert [c["content"] for c in out] == ["high", "mid"], out
 assert out[0]["rerank_score"] == 0.9
 print("ok")
 
+
+class DownReranker:
+    async def rerank(self, query, documents, top_n=None):
+        raise RuntimeError("503 no available server")
+
+
+out = asyncio.run(process_retrieved_chunks("q", [{"content": c} for c in ("a", "b", "c")], SimpleNamespace(chunk_top_k=2), 10_000, DownReranker()))
+assert [c["content"] for c in out] == ["a", "b"], out  # outage: first-stage order, still capped
+print("rerank outage capped ok")
+
 # Rerank requests always carry an integer top_n (a null/missing one is rejected by some backends).
 from easy_knowledge_retriever.reranker.generic import build_rerank_payload
 

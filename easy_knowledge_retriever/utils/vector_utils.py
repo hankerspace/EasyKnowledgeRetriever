@@ -765,13 +765,14 @@ async def process_retrieved_chunks(
                         reordered_chunks.append(chunk)
             
             final_chunks = reordered_chunks
-            # Keep only the best chunks: past a dozen or so, extra passages are mostly distractors.
-            keep = getattr(query_param, "chunk_top_k", None)
-            if keep:
-                final_chunks = final_chunks[:keep]
-            logger.info(f"Reranked {len(reordered_chunks)} chunks using {reranker_service.__class__.__name__}, kept {len(final_chunks)}")
+            logger.info(f"Reranked {len(reordered_chunks)} chunks using {reranker_service.__class__.__name__}")
         except Exception as e:
             logger.error(f"Reranking failed: {e}. Falling back to original order.")
+        # Keep only the best chunks, reranked or not: past a dozen or so, extra passages are mostly
+        # distractors, and a reranker outage must not triple the prompt.
+        keep = getattr(query_param, "chunk_top_k", None)
+        if keep:
+            final_chunks = final_chunks[:keep]
 
     # 2. Token Truncation
     from easy_knowledge_retriever.utils.tokenizer import truncate_list_by_token_size
