@@ -83,3 +83,16 @@ assert '<chunk reference_id="1" page="163">\nArticle 3 Définitions\n</chunk>' i
 assert "- Fournisseur (concept): développe un système d'IA" in ctx
 assert "- Fournisseur <-> Système d'IA: met sur le marché" in ctx
 print("tagged context ok")
+
+# Chunk headings: prepended for embedding, rendered in the context tag.
+from easy_knowledge_retriever.kg.vector_storage.nano_vector_db_impl import embedding_text
+
+assert embedding_text({"content": "1. Les fournisseurs...", "heading": "Article 16 — Obligations"}) == "Article 16 — Obligations\n1. Les fournisseurs..."
+assert embedding_text({"content": "texte"}) == "texte"
+ctx, _ = asyncio.run(_build_context_str(
+    entities_context=[], relations_context=[],
+    merged_chunks=[{"content": "suite", "chunk_id": "c9", "file_path": "doc.pdf", "page_start": 5, "heading": 'Article 3 — "Définitions"'}],
+    query="q", query_param=QueryParam(mode="hybrid_mix"), tokenizer=TiktokenTokenizer(), max_total_tokens=30000,
+    system_prompt_template=PROMPTS["rag_response"]))
+assert '<chunk reference_id="1" page="5" heading="Article 3 — \'Définitions\'">' in ctx, ctx
+print("chunk headings ok")

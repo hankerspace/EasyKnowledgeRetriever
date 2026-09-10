@@ -83,7 +83,7 @@ async def enrich_chunks_from_kv(
     for chunk, full_chunk in zip(targets, full_chunks):
         if not full_chunk:
             continue
-        for key in ("page_start", "page_end"):
+        for key in ("page_start", "page_end", "heading"):
             if key in full_chunk:
                 chunk[key] = full_chunk[key]
         if chunk.get("file_path", "unknown_source") == "unknown_source" and "file_path" in full_chunk:

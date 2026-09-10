@@ -187,7 +187,7 @@ class HybridMixRetrieval(BaseRetrieval):
             if not all_data:
                 return []
                 
-            tokenized_corpus = [simple_tokenize(doc.get("content", "")) for doc in all_data]
+            tokenized_corpus = [simple_tokenize(f"{doc.get('heading') or ''} {doc.get('content', '')}") for doc in all_data]
             self.bm25_index = BM25Okapi(tokenized_corpus)
             self.corpus_chunks = all_data
 

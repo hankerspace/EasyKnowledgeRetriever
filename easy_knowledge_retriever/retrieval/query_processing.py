@@ -949,10 +949,13 @@ async def _build_context_str(
         }
         if chunk.get("page_start") is not None:
             chunk_data["page_start"] = chunk.get("page_start")
+        if chunk.get("heading"):
+            chunk_data["heading"] = str(chunk["heading"]).replace('"', "'")
         chunks_context.append(chunk_data)
 
     text_units_str = "\n\n".join(
         f'<chunk reference_id="{c["reference_id"]}"' + (f' page="{c["page_start"]}"' if "page_start" in c else "")
+        + (f' heading="{c["heading"]}"' if "heading" in c else "")
         + f'>\n{c["content"]}\n</chunk>'
         for c in chunks_context
     )

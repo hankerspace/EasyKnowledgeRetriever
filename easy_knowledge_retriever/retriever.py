@@ -610,7 +610,7 @@ class EasyKnowledgeRetriever:
         self.chunks_vdb: BaseVectorStorage = self.vector_storage.create(
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
             embedding_func=self.embedding_func,
-            meta_fields={"content", "full_doc_id", "source_id", "file_path"},
+            meta_fields={"content", "full_doc_id", "source_id", "file_path", "heading"},
             cosine_better_than_threshold=cosine_threshold,
             embedding_dim=embedding_dim,
         )
