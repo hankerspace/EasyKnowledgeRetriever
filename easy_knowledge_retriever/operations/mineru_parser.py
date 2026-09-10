@@ -20,6 +20,16 @@ def clean_extracted_text(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text)
 
 
+def find_cached_content_list(parsed_docs_dir, file_stem: str) -> Optional[Path]:
+    """A previous MinerU output for this document, if any.
+
+    MinerU writes to ``<stem>/auto/`` or, with its hybrid backend, ``<stem>/hybrid_auto/``:
+    looking only in ``auto`` missed the cache and re-parsed the whole PDF.
+    """
+    found = sorted((Path(parsed_docs_dir) / file_stem).glob(f"*/{file_stem}_content_list.json"))
+    return found[0] if found else None
+
+
 class MineruParser:
     """
     Parser for PDF documents using Mineru (Magic-PDF) CLI.

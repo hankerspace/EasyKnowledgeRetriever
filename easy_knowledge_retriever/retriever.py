@@ -1175,7 +1175,9 @@ class EasyKnowledgeRetriever:
                 import pathlib
                 file_path_obj = pathlib.Path(file_path)
                 file_stem = file_path_obj.stem
-                expected_output_json = pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json"
+                from easy_knowledge_retriever.operations.mineru_parser import find_cached_content_list
+                expected_output_json = (find_cached_content_list(parsed_docs_dir, file_stem)
+                                         or pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json")
             
                 parsed_data = None
                 if expected_output_json.exists():

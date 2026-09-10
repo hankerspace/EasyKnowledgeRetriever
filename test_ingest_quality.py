@@ -23,3 +23,16 @@ assert [c.get("page_start") for c in chunks] == [1, 2, 2], chunks
 long_chunks = chunking_by_token_size(TiktokenTokenizer(), "mot " * 1500, None, False, 50, 600, pages=[{"content": "mot " * 1500, "page_number": 7}])
 assert len(long_chunks) == 3 and long_chunks[0]["page_start"] == 7
 print("chunking ok")
+
+# A previous MinerU parse is found whatever backend sub-directory it was written to.
+import tempfile
+from pathlib import Path
+from easy_knowledge_retriever.operations.mineru_parser import find_cached_content_list
+
+with tempfile.TemporaryDirectory() as d:
+    assert find_cached_content_list(d, "doc") is None
+    target = Path(d) / "doc" / "hybrid_auto" / "doc_content_list.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("[]")
+    assert find_cached_content_list(d, "doc") == target
+print("parse cache ok")
