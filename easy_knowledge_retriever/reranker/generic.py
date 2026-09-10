@@ -12,6 +12,21 @@ from easy_knowledge_retriever.utils.logger import logger
 from .utils import chunk_documents_for_rerank, aggregate_chunk_scores
 
 
+def build_rerank_payload(model: str, query: str, documents: List[str], top_n: Optional[int] = None,
+                         extra_body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Standard rerank request body.
+
+    top_n is always an integer: some OpenAI-compatible backends (vLLM "score") reject a
+    missing or null top_n with a 400, and gateways balancing across mixed backends then
+    fail intermittently.
+    """
+    payload = {"model": model, "query": query, "documents": documents,
+               "top_n": top_n if top_n is not None else len(documents)}
+    if extra_body:
+        payload.update(extra_body)
+    return payload
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=60),
@@ -80,21 +95,7 @@ async def generic_rerank_api(
             )
             top_n = None
 
-    # Build request payload based on request format
-    # Standard format
-    payload = {
-        "model": model,
-        "query": query,
-        "documents": documents,
-    }
-
-    # Add optional parameters
-    if top_n is not None:
-        payload["top_n"] = top_n
-
-    # Add extra parameters
-    if extra_body:
-        payload.update(extra_body)
+    payload = build_rerank_payload(model, query, documents, top_n, extra_body)
 
     logger.debug(
         f"Rerank request: {len(documents)} documents, model: {model}, format: {response_format}"

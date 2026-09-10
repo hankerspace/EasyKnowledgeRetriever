@@ -2908,7 +2908,7 @@ class EasyKnowledgeRetriever:
 
         try:
             if retrieval is None:
-                retrieval = RetrievalFactory.create_retrieval(param)
+                retrieval = RetrievalFactory.create_retrieval(param, self.reranker_service)
 
             # Logic specific to Bypass vs others
             from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval

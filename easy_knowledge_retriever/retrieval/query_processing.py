@@ -845,28 +845,6 @@ async def _merge_all_chunks(
     return merged_chunks
 
 
-def reorder_chunks_lost_in_middle(chunks: list[dict]) -> list[dict]:
-    """
-    Reorder chunks to mitigate 'Lost in the Middle' phenomenon.
-    Places best chunks at the beginning and end, and worst in the middle.
-    Assumes chunks are already sorted by relevance (descending).
-    Logic: [1, 2, 3, 4, 5, 6] -> [1, 3, 5] + [6, 4, 2]
-    """
-    if not chunks:
-        return []
-        
-    best_chunks = []
-    other_chunks = []
-    
-    for i, chunk in enumerate(chunks):
-        if i % 2 == 0:
-            best_chunks.append(chunk)
-        else:
-            other_chunks.append(chunk)
-            
-    return best_chunks + other_chunks[::-1]
-
-
 async def _build_context_str(
     entities_context: list[dict],
     relations_context: list[dict],
@@ -959,9 +937,6 @@ async def _build_context_str(
     reference_list, truncated_chunks = generate_reference_list_from_chunks(
         truncated_chunks
     )
-
-    # Reorder for "Lost in the Middle"
-    truncated_chunks = reorder_chunks_lost_in_middle(truncated_chunks)
 
     # Rebuild chunks_context with truncated chunks
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
