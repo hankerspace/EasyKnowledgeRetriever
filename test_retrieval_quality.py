@@ -66,3 +66,20 @@ openai_rerank.generic_rerank_api = fake_generic
 service = openai_rerank.OpenAIRerankerService(model="m", base_url="http://x/v1/rerank", api_key="k")
 assert asyncio.run(service.rerank("q", ["doc"])) == [{"index": 0, "relevance_score": 1.0}]
 print("reranker call signature ok")
+
+# Context is rendered as tagged text with pages, not JSON lines.
+from easy_knowledge_retriever.kg.base import QueryParam
+from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.retrieval.query_processing import _build_context_str
+from easy_knowledge_retriever.utils.tokenizer import TiktokenTokenizer
+
+ctx, data = asyncio.run(_build_context_str(
+    entities_context=[{"entity": "Fournisseur", "type": "concept", "description": "développe un système d'IA"}],
+    relations_context=[{"entity1": "Fournisseur", "entity2": "Système d'IA", "description": "met sur le marché"}],
+    merged_chunks=[{"content": "Article 3 Définitions", "chunk_id": "c1", "file_path": "doc.pdf", "page_start": 163}],
+    query="q", query_param=QueryParam(mode="hybrid_mix"), tokenizer=TiktokenTokenizer(), max_total_tokens=30000,
+    system_prompt_template=PROMPTS["rag_response"]))
+assert '<chunk reference_id="1" page="163">\nArticle 3 Définitions\n</chunk>' in ctx, ctx
+assert "- Fournisseur (concept): développe un système d'IA" in ctx
+assert "- Fournisseur <-> Système d'IA: met sur le marché" in ctx
+print("tagged context ok")

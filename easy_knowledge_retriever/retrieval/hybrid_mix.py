@@ -38,6 +38,11 @@ class HybridMixRetrieval(BaseRetrieval):
     # RRF k constant
     rrf_k: int = 60
 
+    # Knowledge-graph share of the context. The generic fallback (6000 + 8000 tokens) filled half
+    # of a 30k context with entity/relation descriptions, most of them unrelated to the question.
+    max_entity_tokens: int = 2000
+    max_relation_tokens: int = 2000
+
     hl_keywords: list[str] = field(default_factory=list)
     ll_keywords: list[str] = field(default_factory=list)
 
@@ -52,6 +57,8 @@ class HybridMixRetrieval(BaseRetrieval):
             chunk_top_k=self.chunk_top_k,
             hl_keywords=self.hl_keywords,
             ll_keywords=self.ll_keywords,
+            max_entity_tokens=self.max_entity_tokens,
+            max_relation_tokens=self.max_relation_tokens,
             max_total_tokens=self.max_total_tokens,
             conversation_history=self.conversation_history,
             only_need_context=True,

@@ -889,11 +889,12 @@ async def _build_context_str(
         else "Multiple Paragraphs"
     )
 
+    # Tagged plain text rather than JSON lines: easier for the model to scan in long contexts.
     entities_str = "\n".join(
-        json.dumps(entity, ensure_ascii=False) for entity in entities_context
+        f"- {e['entity']} ({e.get('type', 'UNKNOWN')}): {e.get('description', '')}" for e in entities_context
     )
     relations_str = "\n".join(
-        json.dumps(relation, ensure_ascii=False) for relation in relations_context
+        f"- {r['entity1']} <-> {r['entity2']}: {r.get('description', '')}" for r in relations_context
     )
 
     # Calculate preliminary kg context tokens
@@ -950,8 +951,10 @@ async def _build_context_str(
             chunk_data["page_start"] = chunk.get("page_start")
         chunks_context.append(chunk_data)
 
-    text_units_str = "\n".join(
-        json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context
+    text_units_str = "\n\n".join(
+        f'<chunk reference_id="{c["reference_id"]}"' + (f' page="{c["page_start"]}"' if "page_start" in c else "")
+        + f'>\n{c["content"]}\n</chunk>'
+        for c in chunks_context
     )
     reference_list_str = "\n".join(
         f"[{ref['reference_id']}] {ref['file_path']}"

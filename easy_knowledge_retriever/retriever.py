@@ -2981,10 +2981,7 @@ class EasyKnowledgeRetriever:
                 )
 
             user_prompt = query + (f"\n\n{param.user_prompt}" if param.user_prompt else "")
-            
-            # Add citation suffix defined in prompts
-            if "citation_suffix" in PROMPTS:
-                user_prompt += f"\n\n{PROMPTS['citation_suffix']}"
+            answer_rules = PROMPTS.get("citation_suffix", "").strip()
 
             response_type = (
                 param.response_type
@@ -2996,12 +2993,14 @@ class EasyKnowledgeRetriever:
             sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
             sys_prompt = sys_prompt_temp.format(
                 response_type=response_type,
-                user_prompt=user_prompt,
+                user_prompt=param.user_prompt or "",
                 context_data=query_context_result.context,
             )
 
-            # Append query to the end of system prompt
-            sys_prompt += f"\n\nUser Query: {query}"
+            # Question and answer rules after the context: models weight the end of a long prompt most.
+            sys_prompt += f"\n\n---User Query---\n{query}"
+            if answer_rules:
+                sys_prompt += f"\n\n---Answer Rules---\n{answer_rules}"
             
             if param.only_need_prompt:
                  return QueryResult(

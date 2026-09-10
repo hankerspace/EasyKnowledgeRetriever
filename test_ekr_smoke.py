@@ -171,7 +171,7 @@ def test_naive_retrieval_carries_page_from_text_chunks():
     )
     result = asyncio.run(NaiveRetrieval(max_total_tokens=100_000).retrieve("q", rag))
 
-    assert '"page_start": 42' in result.context, result.context
+    assert 'page="42"' in result.context, result.context
     assert '"page_start": 42' in json.dumps(result.raw_data), result.raw_data
 
 
