@@ -9,7 +9,7 @@ from easy_knowledge_retriever.kg.base import (
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.retrieval.base import BaseRetrieval
-from easy_knowledge_retriever.retrieval.ops import get_vector_context
+from easy_knowledge_retriever.retrieval.ops import enrich_chunks_from_kv, get_vector_context
 from easy_knowledge_retriever.retrieval.query_processing import _build_context_str
 from easy_knowledge_retriever.llm.prompts import PROMPTS
 
@@ -47,6 +47,8 @@ class NaiveRetrieval(BaseRetrieval):
         
         vector_chunks = search_result.get("vector_chunks", [])
         chunk_tracking = search_result.get("chunk_tracking", {})
+        # The chunks vdb has no page metadata; without it the LLM invents page citations
+        await enrich_chunks_from_kv(vector_chunks, rag.text_chunks)
 
         # Build context string directly, skipping keyword extraction and KG context building
         context, final_data = await _build_context_str(

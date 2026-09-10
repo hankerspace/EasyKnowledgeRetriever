@@ -105,6 +105,33 @@ def test_mineru_subprocess_is_bounded():
         raise AssertionError("expected TimeoutExpired")
 
 
+def test_naive_retrieval_carries_page_from_text_chunks():
+    """The chunks vdb has no page metadata: without the text chunk store lookup the LLM invents pages."""
+    import json
+    from easy_knowledge_retriever.retrieval import NaiveRetrieval
+    from easy_knowledge_retriever.utils.tokenizer import Tokenizer
+
+    class ChunksVdb:
+        cosine_better_than_threshold = 0.2
+
+        async def query(self, query, top_k, query_embedding=None):
+            return [{"id": "chunk-1", "content": "Article 5 prohibited practices", "file_path": "ai_act.pdf"}]
+
+    class TextChunks:
+        async def get_by_ids(self, ids):
+            return [{"_id": i, "page_start": 42, "page_end": 43} for i in ids]
+
+    rag = types.SimpleNamespace(
+        chunk_entity_relation_graph=None, entities_vdb=None, relationships_vdb=None,
+        chunks_vdb=ChunksVdb(), text_chunks=TextChunks(),
+        tokenizer=Tokenizer("bytes"), max_total_tokens=100_000,
+    )
+    result = asyncio.run(NaiveRetrieval(max_total_tokens=100_000).retrieve("q", rag))
+
+    assert '"page_start": 42' in result.context, result.context
+    assert '"page_start": 42' in json.dumps(result.raw_data), result.raw_data
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

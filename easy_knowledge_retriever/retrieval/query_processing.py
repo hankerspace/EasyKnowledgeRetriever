@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from easy_knowledge_retriever.retrieval.base import BaseRetrieval
 
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
-from easy_knowledge_retriever.retrieval.ops import get_vector_context
+from easy_knowledge_retriever.retrieval.ops import enrich_chunks_from_kv, get_vector_context
 from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
@@ -785,34 +785,7 @@ async def _merge_all_chunks(
         )
 
     # Enrich vector_chunks with metadata from text_chunks_db if available
-    if vector_chunks and text_chunks_db:
-        chunk_ids_to_fetch = []
-        chunk_map = {}
-        for vc in vector_chunks:
-            cid = vc.get("chunk_id") or vc.get("id")
-            if cid:
-                chunk_ids_to_fetch.append(cid)
-                chunk_map[cid] = vc
-        
-        if chunk_ids_to_fetch:
-            try:
-                full_chunks = await text_chunks_db.get_by_ids(chunk_ids_to_fetch)
-                for full_chunk in full_chunks:
-                    if full_chunk:
-                        cid = full_chunk.get("_id")
-                        if cid and cid in chunk_map:
-                            target_vc = chunk_map[cid]
-                            # Update with page info
-                            if "page_start" in full_chunk:
-                                target_vc["page_start"] = full_chunk["page_start"]
-
-                            if "page_end" in full_chunk:
-                                target_vc["page_end"] = full_chunk["page_end"]
-                            # Update file path if missing
-                            if target_vc.get("file_path", "unknown_source") == "unknown_source" and "file_path" in full_chunk:
-                                target_vc["file_path"] = full_chunk["file_path"]
-            except Exception as e:
-                logger.warning(f"Failed to enrich vector chunks from KV store: {e}")
+    await enrich_chunks_from_kv(vector_chunks, text_chunks_db)
 
     # Round-robin merge chunks from different sources with deduplication
     merged_chunks = []
@@ -1605,10 +1578,11 @@ async def naive_query(
     system_prompt: str | None = None,
     retrieval: "BaseRetrieval" = None,
     enable_llm_cache: bool = True,
+    text_chunks_db: BaseKVStorage | None = None,
 ) -> QueryResult | None:
     """
     Execute naive query and return unified QueryResult object.
-    
+
     Args:
         query: Query string
         chunks_vdb: Document chunks vector database
@@ -1620,6 +1594,7 @@ async def naive_query(
         system_prompt: System prompt
         retrieval: Retrieval strategy instance
         enable_llm_cache: Enable LLM cache
+        text_chunks_db: Text chunk store, source of page_start/page_end
     """
 
     # naive_query failure case
@@ -1638,6 +1613,7 @@ async def naive_query(
         return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     chunks = await get_vector_context(query, chunks_vdb, query_param.chunk_top_k or query_param.top_k, None)
+    await enrich_chunks_from_kv(chunks, text_chunks_db)
 
     if chunks is None or len(chunks) == 0:
         logger.info(

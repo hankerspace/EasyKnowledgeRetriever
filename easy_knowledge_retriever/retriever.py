@@ -2787,6 +2787,7 @@ class EasyKnowledgeRetriever:
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 retrieval=retrieval_strategy,
+                text_chunks_db=self.text_chunks,
             )
         elif data_param.mode == "bypass":
             logger.debug("[aquery_data] Using bypass mode")

@@ -62,6 +62,34 @@ async def get_vector_context(
         return []
 
 
+async def enrich_chunks_from_kv(
+    chunks: list[dict], text_chunks_db: BaseKVStorage | None
+) -> None:
+    """
+    Copy page_start/page_end (and file_path when unknown) from the text chunk store
+    onto vector chunks in place: the chunks vector DB does not store page metadata.
+    """
+    targets = [c for c in chunks if c.get("chunk_id") or c.get("id")]
+    if not targets or not text_chunks_db:
+        return
+    try:
+        # get_by_ids keeps the requested order, with None for missing ids
+        full_chunks = await text_chunks_db.get_by_ids(
+            [c.get("chunk_id") or c.get("id") for c in targets]
+        )
+    except Exception as e:
+        logger.warning(f"Failed to enrich vector chunks from KV store: {e}")
+        return
+    for chunk, full_chunk in zip(targets, full_chunks):
+        if not full_chunk:
+            continue
+        for key in ("page_start", "page_end"):
+            if key in full_chunk:
+                chunk[key] = full_chunk[key]
+        if chunk.get("file_path", "unknown_source") == "unknown_source" and "file_path" in full_chunk:
+            chunk["file_path"] = full_chunk["file_path"]
+
+
 async def get_node_data(
     query: str,
     knowledge_graph_inst: BaseGraphStorage,
