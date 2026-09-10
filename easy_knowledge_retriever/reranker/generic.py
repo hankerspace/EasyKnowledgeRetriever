@@ -39,9 +39,11 @@ def build_rerank_payload(model: str, query: str, documents: List[str], top_n: Op
     return payload
 
 
+# Short waits: the failures seen are load-balancer 500s that succeed on the next try,
+# and every second here adds to the user-facing latency.
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
     retry=(
         retry_if_exception_type(aiohttp.ClientError)
         | retry_if_exception_type(aiohttp.ClientResponseError)
