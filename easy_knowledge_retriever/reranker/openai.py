@@ -78,10 +78,8 @@ async def openai_compatible_rerank(
         base_url=base_url,
         api_key=api_key,
         top_n=top_n,
-        return_documents=False,
         extra_body=extra_body,
         response_format="standard",
-        request_format="standard",
         enable_chunking=enable_chunking,
         max_tokens_per_doc=max_tokens_per_doc
     )

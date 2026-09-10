@@ -47,3 +47,22 @@ from easy_knowledge_retriever.reranker.generic import build_rerank_payload
 assert build_rerank_payload("m", "q", ["a", "b", "c"])["top_n"] == 3
 assert build_rerank_payload("m", "q", ["a", "b"], top_n=1, extra_body={"x": 1}) == {"model": "m", "query": "q", "documents": ["a", "b"], "top_n": 1, "x": 1}
 print("rerank payload ok")
+
+# The OpenAI-compatible reranker calls generic_rerank_api with arguments it accepts
+# (return_documents / request_format made every rerank raise, silently falling back to the unranked order).
+import inspect
+import easy_knowledge_retriever.reranker.openai as openai_rerank
+from easy_knowledge_retriever.reranker.generic import generic_rerank_api
+
+real_signature = inspect.signature(generic_rerank_api)
+
+
+async def fake_generic(*args, **kwargs):
+    real_signature.bind(*args, **kwargs)  # raises TypeError on an unknown argument
+    return [{"index": 0, "relevance_score": 1.0}]
+
+
+openai_rerank.generic_rerank_api = fake_generic
+service = openai_rerank.OpenAIRerankerService(model="m", base_url="http://x/v1/rerank", api_key="k")
+assert asyncio.run(service.rerank("q", ["doc"])) == [{"index": 0, "relevance_score": 1.0}]
+print("reranker call signature ok")
