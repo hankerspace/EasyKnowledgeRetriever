@@ -96,3 +96,46 @@ ctx, _ = asyncio.run(_build_context_str(
     system_prompt_template=PROMPTS["rag_response"]))
 assert '<chunk reference_id="1" page="5" heading="Article 3 — \'Définitions\'">' in ctx, ctx
 print("chunk headings ok")
+
+# The reranker scores the heading with the content.
+seen_docs = []
+
+
+class RecordingReranker:
+    async def rerank(self, query, documents, top_n=None):
+        seen_docs.append(list(documents))
+        return [{"index": i, "relevance_score": 1.0 - i / 10} for i in range(len(documents))]
+
+
+asyncio.run(process_retrieved_chunks("q", [{"content": "1. Biométrie", "heading": "Annexe III"}, {"content": "sans titre"}],
+                                     SimpleNamespace(chunk_top_k=5), 10_000, RecordingReranker()))
+assert seen_docs == [["Annexe III\n1. Biométrie", "sans titre"]], seen_docs
+print("rerank text ok")
+
+# Chunks following the best hits are scored and replace the tail only when they outrank it.
+from easy_knowledge_retriever.retrieval.query_processing import _add_reranked_neighbors
+
+
+class OrderedKV:
+    def __init__(self):
+        self._data = {f"c{i}": {"content": f"part {i}", "full_doc_id": "d", "chunk_order_index": i, "file_path": "doc.pdf"} for i in range(5)}
+
+    async def get_by_ids(self, ids):
+        return [self._data.get(i) for i in ids]
+
+
+class NeighbourReranker:
+    async def rerank(self, query, documents, top_n=None):
+        seen_docs.append(list(documents))
+        scores = {"part 1": 0.8, "part 2": 0.1, "part 4": 0.05}
+        return [{"index": i, "relevance_score": scores[d]} for i, d in enumerate(documents)]
+
+
+seen_docs.clear()
+best = [{"content": "part 0", "chunk_id": "c0", "rerank_score": 0.9}, {"content": "part 3", "chunk_id": "c3", "rerank_score": 0.2}]
+tracking = {}
+kept = asyncio.run(_add_reranked_neighbors("q", best, OrderedKV(), NeighbourReranker(), QueryParam(chunk_top_k=2), tracking))
+assert seen_docs == [["part 1", "part 2", "part 4"]], seen_docs  # c3 is already kept; c5 does not exist
+assert [c["chunk_id"] for c in kept] == ["c0", "c1"], kept
+assert kept[1]["file_path"] == "doc.pdf" and tracking["c1"]["source"] == "N"
+print("neighbour chunks ok")

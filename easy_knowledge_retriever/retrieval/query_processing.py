@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 from easy_knowledge_retriever.retrieval.ops import enrich_chunks_from_kv, get_vector_context
-from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks
+from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks, rerank_text
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
 from easy_knowledge_retriever.utils.logger import logger
@@ -730,6 +730,69 @@ async def _apply_token_truncation(
     }
 
 
+NEIGHBOR_TOP = 5  # best reranked chunks whose continuation is offered to the reranker
+NEIGHBOR_SPAN = 2  # following chunks considered for each of them
+
+
+async def _add_reranked_neighbors(
+    query: str,
+    chunks: list[dict],
+    text_chunks_db: BaseKVStorage | None,
+    reranker_service: BaseRerankerService,
+    query_param: QueryParam,
+    chunk_tracking: dict | None = None,
+) -> list[dict]:
+    """A list or an article often runs over the next chunks (a whole annex spans several): score the
+    chunks that follow the best hits and keep them only where they outrank the current tail."""
+    data = getattr(text_chunks_db, "_data", None)
+    if not data or not chunks or chunks[0].get("rerank_score") is None:
+        return chunks
+    # ponytail: position index rebuilt in O(corpus) when the chunk count changes; store it at ingestion for huge corpora
+    cached = getattr(text_chunks_db, "_position_index", None)
+    if cached is None or cached[0] != len(data):
+        cached = (len(data), {(c.get("full_doc_id"), c.get("chunk_order_index")): cid for cid, c in data.items()})
+        text_chunks_db._position_index = cached
+    positions = cached[1]
+
+    seen = {c.get("chunk_id") for c in chunks}
+    wanted = []
+    for chunk in chunks[:NEIGHBOR_TOP]:
+        full = data.get(chunk.get("chunk_id")) or {}
+        if full.get("chunk_order_index") is None:
+            continue
+        for step in range(1, NEIGHBOR_SPAN + 1):
+            cid = positions.get((full.get("full_doc_id"), full["chunk_order_index"] + step))
+            if cid and cid not in seen:
+                seen.add(cid)
+                wanted.append(cid)
+    if not wanted:
+        return chunks
+
+    neighbors = [
+        dict(d, chunk_id=cid, source_type="neighbor")
+        for cid, d in zip(wanted, await text_chunks_db.get_by_ids(wanted))
+        if d and "content" in d
+    ]
+    try:
+        scores = await reranker_service.rerank(query, [rerank_text(n) for n in neighbors])
+    except Exception as e:
+        logger.warning(f"Neighbour reranking failed, keeping the first ranking: {e}")
+        return chunks
+    for r in scores:
+        if 0 <= r.get("index", -1) < len(neighbors):
+            neighbors[r["index"]]["rerank_score"] = r.get("relevance_score")
+
+    pool = chunks + [n for n in neighbors if n.get("rerank_score") is not None]
+    pool.sort(key=lambda c: c.get("rerank_score") or 0, reverse=True)
+    kept = pool[: query_param.chunk_top_k or len(pool)]
+    added = [c for c in kept if c.get("source_type") == "neighbor"]
+    if chunk_tracking is not None:
+        for c in added:
+            chunk_tracking.setdefault(c["chunk_id"], {"source": "N", "frequency": 1, "order": kept.index(c) + 1})
+    logger.info(f"Neighbour chunks: scored {len(neighbors)}, kept {len(added)}")
+    return kept
+
+
 async def _merge_all_chunks(
     filtered_entities: list[dict],
     filtered_relations: list[dict],
@@ -840,6 +903,9 @@ async def _merge_all_chunks(
             query_param=query_param,
             chunk_token_limit=max_tokens,
             reranker_service=reranker_service
+        )
+        merged_chunks = await _add_reranked_neighbors(
+            query, merged_chunks, text_chunks_db, reranker_service, query_param, chunk_tracking
         )
 
     return merged_chunks

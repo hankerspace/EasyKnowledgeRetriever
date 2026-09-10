@@ -708,6 +708,13 @@ async def aexport_data(
 
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
+def rerank_text(chunk: dict) -> str:
+    """Text scored by the reranker: the chunk heading (article/annex) is prepended, as for embeddings,
+    so a passage continuing an article is still judged against that article's subject."""
+    heading = chunk.get("heading")
+    return f"{heading}\n{chunk.get('content', '')}" if heading else chunk.get("content", "")
+
+
 async def process_retrieved_chunks(
     query: str,
     unique_chunks: list[dict],
@@ -735,7 +742,7 @@ async def process_retrieved_chunks(
     if reranker_service:
         try:
             # Extract contents
-            contents = [c.get("content", "") for c in final_chunks]
+            contents = [rerank_text(c) for c in final_chunks]
             # Rerank
             rerank_results = await reranker_service.rerank(query, contents)
             # Reorder unique_chunks based on results
