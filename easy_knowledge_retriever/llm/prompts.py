@@ -225,10 +225,10 @@ Consider the conversation history if provided to maintain conversational flow an
 
 1. Step-by-Step Instruction:
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
-  - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
+  - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query. Knowledge Graph descriptions are summaries: take the wording of rules, conditions and lists from the Document Chunks.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
+  - Track the reference_id and page of the document chunks which directly support the facts presented in the response (each `<chunk>` tag carries its `reference_id`, its `page` and, when known, the `heading` of the article or annex it belongs to). Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF the source chunk has a `page`, you MUST include it in the reference list entry.
   - Generate a references section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
@@ -239,6 +239,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Never attribute information from the provided documents to another text, and never cite a document for a fact it does not contain.
   - If the query rests on a premise that the **Context** contradicts, correct the premise first, then answer.
   - Do not add dates, amounts or identifiers (such as a regulation number) that are not written in the **Context**.
+  - Every statement must be backed by a passage of the **Context**. Do not add obligations, actors, conditions, exceptions or examples that the passages do not state, and do not complete a list from memory. Report who must do what, by when and under which condition exactly as the passage says.
 
 3. Formatting & Language:
   - The response MUST be in the same language as the user query.
@@ -292,8 +293,8 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
+  - Track the reference_id and page of the document chunks which directly support the facts presented in the response (each `<chunk>` tag carries its `reference_id`, its `page` and, when known, the `heading` of the article or annex it belongs to). Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF the source chunk has a `page`, you MUST include it in the reference list entry.
   - Generate a **References** section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
@@ -304,6 +305,7 @@ Consider the conversation history if provided to maintain conversational flow an
   - Never attribute information from the provided documents to another text, and never cite a document for a fact it does not contain.
   - If the query rests on a premise that the **Context** contradicts, correct the premise first, then answer.
   - Do not add dates, amounts or identifiers (such as a regulation number) that are not written in the **Context**.
+  - Every statement must be backed by a passage of the **Context**. Do not add obligations, actors, conditions, exceptions or examples that the passages do not state, and do not complete a list from memory. Report who must do what, by when and under which condition exactly as the passage says.
 
 3. Formatting & Language:
   - The response MUST be in the same language as the user query.
