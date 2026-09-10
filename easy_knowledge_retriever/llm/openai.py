@@ -7,6 +7,7 @@ from openai import (
     APIConnectionError,
     RateLimitError,
     APITimeoutError,
+    InternalServerError,
 )
 from tenacity import (
     retry,
@@ -41,6 +42,7 @@ from .client import create_openai_async_client
         retry_if_exception_type(RateLimitError)
         | retry_if_exception_type(APIConnectionError)
         | retry_if_exception_type(APITimeoutError)
+        | retry_if_exception_type(InternalServerError)  # transient gateway 5xx
         | retry_if_exception_type(InvalidResponseError)
     ),
 )
@@ -537,6 +539,7 @@ async def gpt_4o_mini_complete(
         retry_if_exception_type(RateLimitError)
         | retry_if_exception_type(APIConnectionError)
         | retry_if_exception_type(APITimeoutError)
+        | retry_if_exception_type(InternalServerError)  # transient gateway 5xx
     ),
 )
 async def openai_embed(

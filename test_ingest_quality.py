@@ -36,3 +36,14 @@ with tempfile.TemporaryDirectory() as d:
     target.write_text("[]")
     assert find_cached_content_list(d, "doc") == target
 print("parse cache ok")
+
+# A transient gateway 500 is retried instead of failing the whole ingestion.
+from openai import InternalServerError
+from easy_knowledge_retriever.llm.openai import openai_complete_if_cache
+
+retried = set()
+for condition in openai_complete_if_cache.retry.retry.retries:
+    retried.update(getattr(condition, "exception_types", ()) if isinstance(getattr(condition, "exception_types", ()), tuple)
+                   else (condition.exception_types,))
+assert InternalServerError in retried, retried
+print("llm retry ok")
