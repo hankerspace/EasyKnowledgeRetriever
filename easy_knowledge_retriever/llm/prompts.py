@@ -272,6 +272,8 @@ Consider the conversation history if provided to maintain conversational flow an
 """
 PROMPTS["citation_suffix"] = """
 Every response should be justified by indicating the reference documents and page numbers at the end of the sentence or paragraph. Each document/page pair should be indicated in brackets, for example [1, page 2].
+
+Work in two steps. 1) Identify the legal text or the precise topic the question is about. 2) If that text or topic is not the one covered by the documents in the Context (for example the question is about another regulation, even a related one or one the documents mention), answer only, in the language of the question, that the provided documents do not contain this information. In that case use neither your own knowledge nor passages of the documents. Otherwise, answer normally.
 """
 
 PROMPTS["naive_rag_response"] = """---Role---
