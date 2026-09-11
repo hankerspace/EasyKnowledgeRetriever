@@ -22,8 +22,8 @@ if TYPE_CHECKING:
     from easy_knowledge_retriever.retrieval.base import BaseRetrieval
 
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
-from easy_knowledge_retriever.retrieval.ops import get_vector_context
-from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks
+from easy_knowledge_retriever.retrieval.ops import enrich_chunks_from_kv, get_vector_context
+from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks, rerank_text
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
 from easy_knowledge_retriever.utils.logger import logger
@@ -730,6 +730,54 @@ async def _apply_token_truncation(
     }
 
 
+NEIGHBOR_TOP = 5  # best first-stage (dense + BM25) chunks whose continuation joins the rerank pool
+NEIGHBOR_SPAN = 2  # following chunks added for each of them
+
+
+async def _add_neighbor_candidates(
+    anchors: list[dict],
+    merged_chunks: list[dict],
+    text_chunks_db: BaseKVStorage | None,
+    chunk_tracking: dict | None = None,
+) -> list[dict]:
+    """A list or an article often runs over the next chunks (a whole annex spans several): the chunks that
+    follow the best first-stage hits join the rerank pool, where they win a place only if relevant."""
+    data = getattr(text_chunks_db, "_data", None)
+    if not data or not anchors:
+        return merged_chunks
+    # ponytail: position index rebuilt in O(corpus) when the chunk count changes; store it at ingestion for huge corpora
+    cached = getattr(text_chunks_db, "_position_index", None)
+    if cached is None or cached[0] != len(data):
+        cached = (len(data), {(c.get("full_doc_id"), c.get("chunk_order_index")): cid for cid, c in data.items()})
+        text_chunks_db._position_index = cached
+    positions = cached[1]
+
+    seen = {c.get("chunk_id") for c in merged_chunks}
+    wanted = []
+    for chunk in anchors:
+        full = data.get(chunk.get("chunk_id")) or {}
+        if full.get("chunk_order_index") is None:
+            continue
+        for step in range(1, NEIGHBOR_SPAN + 1):
+            cid = positions.get((full.get("full_doc_id"), full["chunk_order_index"] + step))
+            if cid and cid not in seen:
+                seen.add(cid)
+                wanted.append(cid)
+    if not wanted:
+        return merged_chunks
+
+    neighbors = [
+        dict(d, chunk_id=cid, source_type="neighbor")
+        for cid, d in zip(wanted, await text_chunks_db.get_by_ids(wanted))
+        if d and "content" in d
+    ]
+    if chunk_tracking is not None:
+        for i, c in enumerate(neighbors):
+            chunk_tracking.setdefault(c["chunk_id"], {"source": "N", "frequency": 1, "order": len(merged_chunks) + i + 1})
+    logger.info(f"Neighbour candidates added to the rerank pool: {len(neighbors)}")
+    return merged_chunks + neighbors
+
+
 async def _merge_all_chunks(
     filtered_entities: list[dict],
     filtered_relations: list[dict],
@@ -785,34 +833,7 @@ async def _merge_all_chunks(
         )
 
     # Enrich vector_chunks with metadata from text_chunks_db if available
-    if vector_chunks and text_chunks_db:
-        chunk_ids_to_fetch = []
-        chunk_map = {}
-        for vc in vector_chunks:
-            cid = vc.get("chunk_id") or vc.get("id")
-            if cid:
-                chunk_ids_to_fetch.append(cid)
-                chunk_map[cid] = vc
-        
-        if chunk_ids_to_fetch:
-            try:
-                full_chunks = await text_chunks_db.get_by_ids(chunk_ids_to_fetch)
-                for full_chunk in full_chunks:
-                    if full_chunk:
-                        cid = full_chunk.get("_id")
-                        if cid and cid in chunk_map:
-                            target_vc = chunk_map[cid]
-                            # Update with page info
-                            if "page_start" in full_chunk:
-                                target_vc["page_start"] = full_chunk["page_start"]
-
-                            if "page_end" in full_chunk:
-                                target_vc["page_end"] = full_chunk["page_end"]
-                            # Update file path if missing
-                            if target_vc.get("file_path", "unknown_source") == "unknown_source" and "file_path" in full_chunk:
-                                target_vc["file_path"] = full_chunk["file_path"]
-            except Exception as e:
-                logger.warning(f"Failed to enrich vector chunks from KV store: {e}")
+    await enrich_chunks_from_kv(vector_chunks, text_chunks_db)
 
     # Round-robin merge chunks from different sources with deduplication
     merged_chunks = []
@@ -859,6 +880,9 @@ async def _merge_all_chunks(
         # We can pass a large limit to avoid truncation here, or pass the actual limit.
         # QueryParam has max_total_tokens.
         
+        merged_chunks = await _add_neighbor_candidates(
+            vector_chunks[:NEIGHBOR_TOP], merged_chunks, text_chunks_db, chunk_tracking
+        )
         # Reuse process_retrieved_chunks for reranking
         max_tokens = query_param.max_total_tokens or 30000 # fallback
         merged_chunks = await process_retrieved_chunks(
@@ -870,28 +894,6 @@ async def _merge_all_chunks(
         )
 
     return merged_chunks
-
-
-def reorder_chunks_lost_in_middle(chunks: list[dict]) -> list[dict]:
-    """
-    Reorder chunks to mitigate 'Lost in the Middle' phenomenon.
-    Places best chunks at the beginning and end, and worst in the middle.
-    Assumes chunks are already sorted by relevance (descending).
-    Logic: [1, 2, 3, 4, 5, 6] -> [1, 3, 5] + [6, 4, 2]
-    """
-    if not chunks:
-        return []
-        
-    best_chunks = []
-    other_chunks = []
-    
-    for i, chunk in enumerate(chunks):
-        if i % 2 == 0:
-            best_chunks.append(chunk)
-        else:
-            other_chunks.append(chunk)
-            
-    return best_chunks + other_chunks[::-1]
 
 
 async def _build_context_str(
@@ -938,11 +940,12 @@ async def _build_context_str(
         else "Multiple Paragraphs"
     )
 
+    # Tagged plain text rather than JSON lines: easier for the model to scan in long contexts.
     entities_str = "\n".join(
-        json.dumps(entity, ensure_ascii=False) for entity in entities_context
+        f"- {e['entity']} ({e.get('type', 'UNKNOWN')}): {e.get('description', '')}" for e in entities_context
     )
     relations_str = "\n".join(
-        json.dumps(relation, ensure_ascii=False) for relation in relations_context
+        f"- {r['entity1']} <-> {r['entity2']}: {r.get('description', '')}" for r in relations_context
     )
 
     # Calculate preliminary kg context tokens
@@ -987,9 +990,6 @@ async def _build_context_str(
         truncated_chunks
     )
 
-    # Reorder for "Lost in the Middle"
-    truncated_chunks = reorder_chunks_lost_in_middle(truncated_chunks)
-
     # Rebuild chunks_context with truncated chunks
     # The actual tokens may be slightly less than available_chunk_tokens due to deduplication logic
     chunks_context = []
@@ -1000,10 +1000,15 @@ async def _build_context_str(
         }
         if chunk.get("page_start") is not None:
             chunk_data["page_start"] = chunk.get("page_start")
+        if chunk.get("heading"):
+            chunk_data["heading"] = str(chunk["heading"]).replace('"', "'")
         chunks_context.append(chunk_data)
 
-    text_units_str = "\n".join(
-        json.dumps(text_unit, ensure_ascii=False) for text_unit in chunks_context
+    text_units_str = "\n\n".join(
+        f'<chunk reference_id="{c["reference_id"]}"' + (f' page="{c["page_start"]}"' if "page_start" in c else "")
+        + (f' heading="{c["heading"]}"' if "heading" in c else "")
+        + f'>\n{c["content"]}\n</chunk>'
+        for c in chunks_context
     )
     reference_list_str = "\n".join(
         f"[{ref['reference_id']}] {ref['file_path']}"
@@ -1605,10 +1610,11 @@ async def naive_query(
     system_prompt: str | None = None,
     retrieval: "BaseRetrieval" = None,
     enable_llm_cache: bool = True,
+    text_chunks_db: BaseKVStorage | None = None,
 ) -> QueryResult | None:
     """
     Execute naive query and return unified QueryResult object.
-    
+
     Args:
         query: Query string
         chunks_vdb: Document chunks vector database
@@ -1620,6 +1626,7 @@ async def naive_query(
         system_prompt: System prompt
         retrieval: Retrieval strategy instance
         enable_llm_cache: Enable LLM cache
+        text_chunks_db: Text chunk store, source of page_start/page_end
     """
 
     # naive_query failure case
@@ -1638,6 +1645,7 @@ async def naive_query(
         return QueryResult(content=PROMPTS["fail_response"], query=query)
 
     chunks = await get_vector_context(query, chunks_vdb, query_param.chunk_top_k or query_param.top_k, None)
+    await enrich_chunks_from_kv(chunks, text_chunks_db)
 
     if chunks is None or len(chunks) == 0:
         logger.info(
@@ -1905,19 +1913,77 @@ def merge_query_results(results: list[QueryContextResult]) -> QueryContextResult
         "chunk_tracking": {},
         "metadata": {}
     }
-    
+    # User-facing data (QueryResult.chunks/references are built from it), de-duplicated.
+    chunks: dict = {}
+    entities: dict = {}
+    relationships: dict = {}
+    # Each sub-query numbers its references from "1", so ids collide: renumber by file_path.
+    ref_by_path: dict[str, str] = {}
+    keywords = {"high_level": [], "low_level": []}
+    processing_info: dict[str, Any] = {}
+    metadata = merged_raw_data["metadata"]
+
     for i, result in enumerate(results):
         if result.context:
             merged_context += f"\n--- Context for Sub-query {i+1} ---\n{result.context}\n"
-        
+
         # Merge raw data
         if result.raw_data:
             for key in ["local_entities", "local_relations", "global_entities", "global_relations", "vector_chunks"]:
                 if key in result.raw_data and isinstance(result.raw_data[key], list):
                     merged_raw_data[key].extend(result.raw_data[key])
-            
+
             # Merge chunk tracking
             if "chunk_tracking" in result.raw_data:
                 merged_raw_data["chunk_tracking"].update(result.raw_data["chunk_tracking"])
+
+        raw = result.raw_data or {}
+        for key in ("status", "message"):
+            if key in raw:
+                merged_raw_data.setdefault(key, raw[key])
+
+        data = raw.get("data") or {}
+        local_ref_ids = {}
+        for ref in data.get("references") or []:
+            path = ref.get("file_path")
+            if path:
+                new_id = ref_by_path.setdefault(path, str(len(ref_by_path) + 1))
+                local_ref_ids[str(ref.get("reference_id", ""))] = new_id
+
+        def _remap(item: dict) -> dict:
+            item = dict(item)
+            if item.get("reference_id"):
+                item["reference_id"] = local_ref_ids.get(str(item["reference_id"]), "")
+            return item
+
+        for c in data.get("chunks") or []:
+            chunks.setdefault(c.get("chunk_id") or c.get("content"), _remap(c))
+        for e in data.get("entities") or []:
+            entities.setdefault(e.get("entity_name"), _remap(e))
+        for r in data.get("relationships") or []:
+            relationships.setdefault((r.get("src_id"), r.get("tgt_id")), _remap(r))
+
+        meta = raw.get("metadata") or {}
+        if "query_mode" in meta:
+            metadata.setdefault("query_mode", meta["query_mode"])
+        for level, kws in keywords.items():
+            for kw in (meta.get("keywords") or {}).get(level) or []:
+                if kw not in kws:
+                    kws.append(kw)
+        for key, value in (meta.get("processing_info") or {}).items():
+            if isinstance(value, (int, float)):
+                processing_info[key] = processing_info.get(key, 0) + value
+
+    merged_raw_data["data"] = {
+        "entities": list(entities.values()),
+        "relationships": list(relationships.values()),
+        "chunks": list(chunks.values()),
+        "references": [{"reference_id": rid, "file_path": p} for p, rid in ref_by_path.items()],
+    }
+    metadata["keywords"] = keywords
+    # ponytail: counts are summed across sub-queries; only final_chunks_count reflects de-duplication
+    processing_info["final_chunks_count"] = len(chunks)
+    processing_info["sub_query_count"] = len(results)
+    metadata["processing_info"] = processing_info
 
     return QueryContextResult(context=merged_context, raw_data=merged_raw_data)

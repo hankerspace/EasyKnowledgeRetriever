@@ -9,12 +9,16 @@ from easy_knowledge_retriever.kg.base import (
 from easy_knowledge_retriever.kg.graph_storage.base import BaseGraphStorage
 from easy_knowledge_retriever.kg.vector_storage.base import BaseVectorStorage
 from easy_knowledge_retriever.retrieval.base import BaseRetrieval
-from easy_knowledge_retriever.retrieval.ops import get_vector_context
+from easy_knowledge_retriever.retrieval.ops import enrich_chunks_from_kv, get_vector_context
 from easy_knowledge_retriever.retrieval.query_processing import _build_context_str
 from easy_knowledge_retriever.llm.prompts import PROMPTS
+from easy_knowledge_retriever.utils.vector_utils import process_retrieved_chunks
 
 if TYPE_CHECKING:
     from easy_knowledge_retriever.retriever import EasyKnowledgeRetriever
+
+
+CANDIDATE_FACTOR = 2  # with a reranker, dense search fetches this many times chunk_top_k candidates
 
 
 @dataclass
@@ -47,6 +51,13 @@ class NaiveRetrieval(BaseRetrieval):
         
         vector_chunks = search_result.get("vector_chunks", [])
         chunk_tracking = search_result.get("chunk_tracking", {})
+        # The chunks vdb has no page metadata; without it the LLM invents page citations
+        await enrich_chunks_from_kv(vector_chunks, rag.text_chunks)
+        if self.reranker_service and vector_chunks:
+            # Rerank a wider dense pool down to chunk_top_k: on exactly chunk_top_k candidates it could only reorder them.
+            vector_chunks = await process_retrieved_chunks(
+                query, vector_chunks, query_param, rag.max_total_tokens, self.reranker_service
+            )
 
         # Build context string directly, skipping keyword extraction and KG context building
         context, final_data = await _build_context_str(
@@ -79,7 +90,7 @@ class NaiveRetrieval(BaseRetrieval):
             vector_chunks = await get_vector_context(
                 query,
                 chunks_vdb,
-                self.chunk_top_k,
+                self.chunk_top_k * CANDIDATE_FACTOR if self.reranker_service else self.chunk_top_k,
                 query_embedding
             )
             # Track vector chunks

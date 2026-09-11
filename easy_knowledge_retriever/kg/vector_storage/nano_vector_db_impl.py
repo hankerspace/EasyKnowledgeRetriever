@@ -24,6 +24,13 @@ from easy_knowledge_retriever.constants import DEFAULT_EMBEDDING_BATCH_NUM
 from nano_vectordb import NanoVectorDB
 
 
+def embedding_text(record: dict[str, Any]) -> str:
+    """Text embedded for a record: an optional heading (e.g. the article a chunk belongs to) is
+    prepended, so a passage deep inside an article is still found by the article's subject."""
+    heading = record.get("heading")
+    return f"{heading}\n{record['content']}" if heading else record["content"]
+
+
 @final
 @dataclass
 class NanoVectorDBStorage(BaseVectorStorage):
@@ -158,7 +165,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             }
             for k, v in data.items()
         ]
-        contents = [v["content"] for v in data.values()]
+        contents = [embedding_text(v) for v in data.values()]
         batches = [
             contents[i : i + self._max_batch_size]
             for i in range(0, len(contents), self._max_batch_size)

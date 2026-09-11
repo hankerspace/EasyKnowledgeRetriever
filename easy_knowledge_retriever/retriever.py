@@ -610,7 +610,7 @@ class EasyKnowledgeRetriever:
         self.chunks_vdb: BaseVectorStorage = self.vector_storage.create(
             namespace=NameSpace.VECTOR_STORE_CHUNKS,
             embedding_func=self.embedding_func,
-            meta_fields={"content", "full_doc_id", "source_id", "file_path"},
+            meta_fields={"content", "full_doc_id", "source_id", "file_path", "heading"},
             cosine_better_than_threshold=cosine_threshold,
             embedding_dim=embedding_dim,
         )
@@ -1175,7 +1175,9 @@ class EasyKnowledgeRetriever:
                 import pathlib
                 file_path_obj = pathlib.Path(file_path)
                 file_stem = file_path_obj.stem
-                expected_output_json = pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json"
+                from easy_knowledge_retriever.operations.mineru_parser import find_cached_content_list
+                expected_output_json = (find_cached_content_list(parsed_docs_dir, file_stem)
+                                         or pathlib.Path(parsed_docs_dir) / file_stem / "auto" / f"{file_stem}_content_list.json")
             
                 parsed_data = None
                 if expected_output_json.exists():
@@ -2787,6 +2789,7 @@ class EasyKnowledgeRetriever:
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
                 retrieval=retrieval_strategy,
+                text_chunks_db=self.text_chunks,
             )
         elif data_param.mode == "bypass":
             logger.debug("[aquery_data] Using bypass mode")
@@ -2905,7 +2908,7 @@ class EasyKnowledgeRetriever:
 
         try:
             if retrieval is None:
-                retrieval = RetrievalFactory.create_retrieval(param)
+                retrieval = RetrievalFactory.create_retrieval(param, self.reranker_service)
 
             # Logic specific to Bypass vs others
             from easy_knowledge_retriever.retrieval.bypass import BypassRetrieval
@@ -2978,10 +2981,7 @@ class EasyKnowledgeRetriever:
                 )
 
             user_prompt = query + (f"\n\n{param.user_prompt}" if param.user_prompt else "")
-            
-            # Add citation suffix defined in prompts
-            if "citation_suffix" in PROMPTS:
-                user_prompt += f"\n\n{PROMPTS['citation_suffix']}"
+            answer_rules = PROMPTS.get("citation_suffix", "").strip()
 
             response_type = (
                 param.response_type
@@ -2993,12 +2993,14 @@ class EasyKnowledgeRetriever:
             sys_prompt_temp = system_prompt if system_prompt else PROMPTS["rag_response"]
             sys_prompt = sys_prompt_temp.format(
                 response_type=response_type,
-                user_prompt=user_prompt,
+                user_prompt=param.user_prompt or "",
                 context_data=query_context_result.context,
             )
 
-            # Append query to the end of system prompt
-            sys_prompt += f"\n\nUser Query: {query}"
+            # Question and answer rules after the context: models weight the end of a long prompt most.
+            sys_prompt += f"\n\n---User Query---\n{query}"
+            if answer_rules:
+                sys_prompt += f"\n\n---Answer Rules---\n{answer_rules}"
             
             if param.only_need_prompt:
                  return QueryResult(

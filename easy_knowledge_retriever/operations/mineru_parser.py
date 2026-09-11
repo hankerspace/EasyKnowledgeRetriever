@@ -1,3 +1,4 @@
+import re
 import json
 import os
 import shutil
@@ -8,6 +9,26 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from easy_knowledge_retriever.constants import DEFAULT_MINERU_TIMEOUT
+
+_INLINE_SUP = re.compile(r"\$\s*\^\s*\{\s*([^{}$]*?)\s*\}\s*\$")
+
+
+def clean_extracted_text(text: str) -> str:
+    """Strip layout artefacts that break exact citations: amendment markers (▌) and the
+    inline LaTeX superscripts MinerU emits for reference calls (``$^ { 16 }$`` -> ``16``)."""
+    text = _INLINE_SUP.sub(lambda m: m.group(1).replace(" ", ""), (text or "").replace("▌", ""))
+    return re.sub(r"[ \t]{2,}", " ", text)
+
+
+def find_cached_content_list(parsed_docs_dir, file_stem: str) -> Optional[Path]:
+    """A previous MinerU output for this document, if any.
+
+    MinerU writes to ``<stem>/auto/`` or, with its hybrid backend, ``<stem>/hybrid_auto/``:
+    looking only in ``auto`` missed the cache and re-parsed the whole PDF.
+    """
+    found = sorted((Path(parsed_docs_dir) / file_stem).glob(f"*/{file_stem}_content_list.json"))
+    return found[0] if found else None
+
 
 class MineruParser:
     """
@@ -135,7 +156,7 @@ class MineruParser:
                 pages[page_idx] = {"content": "", "images": [], "page_number": page_idx + 1}
             
             if item_type == "text":
-                text = item.get("text", "")
+                text = clean_extracted_text(item.get("text", ""))
                 if text:
                     full_text.append(text)
                     pages[page_idx]["content"] += text + "\n"

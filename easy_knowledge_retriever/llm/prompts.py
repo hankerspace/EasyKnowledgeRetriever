@@ -217,7 +217,7 @@ You are an expert AI assistant specializing in synthesizing information from a p
 
 ---Goal---
 
-Generate a comprehensive, well-structured answer to the user query.
+Generate a precise, well-structured answer to the user query. Start with the direct answer, then give only the details the question calls for: a few sentences for a factual question, a list for an enumeration.
 The answer must integrate relevant facts from the Knowledge Graph and Document Chunks found in the **Context**.
 Consider the conversation history if provided to maintain conversational flow and avoid repeating information.
 
@@ -225,16 +225,21 @@ Consider the conversation history if provided to maintain conversational flow an
 
 1. Step-by-Step Instruction:
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
-  - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
+  - Scrutinize both `Knowledge Graph Data` and `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query. Knowledge Graph descriptions are summaries: take the wording of rules, conditions and lists from the Document Chunks.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
+  - Track the reference_id and page of the document chunks which directly support the facts presented in the response (each `<chunk>` tag carries its `reference_id`, its `page` and, when known, the `heading` of the article or annex it belongs to). Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF the source chunk has a `page`, you MUST include it in the reference list entry.
   - Generate a references section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
+  - Treat the **Context** as the only source of truth, even when you know the answer from elsewhere. If the query is about a text, regulation, organisation or topic that the **Context** does not cover (for example a different regulation than the one in the documents), say explicitly that the provided documents do not contain this information and do not answer from your own knowledge.
+  - Never attribute information from the provided documents to another text, and never cite a document for a fact it does not contain.
+  - If the query rests on a premise that the **Context** contradicts, correct the premise first, then answer.
+  - Do not add dates, amounts or identifiers (such as a regulation number) that are not written in the **Context**.
+  - Every statement must be backed by a passage of the **Context**. Do not add obligations, actors, conditions, exceptions or examples that the passages do not state, and do not complete a list from memory. Report who must do what, by when and under which condition exactly as the passage says.
 
 3. Formatting & Language:
   - The response MUST be in the same language as the user query.
@@ -268,6 +273,8 @@ Consider the conversation history if provided to maintain conversational flow an
 """
 PROMPTS["citation_suffix"] = """
 Every response should be justified by indicating the reference documents and page numbers at the end of the sentence or paragraph. Each document/page pair should be indicated in brackets, for example [1, page 2].
+
+Work in two steps. 1) Identify the legal text or the precise topic the question is about. 2) If that text or topic is not the one covered by the documents in the Context (for example the question is about another regulation, even a related one or one the documents mention), answer only, in the language of the question, that the provided documents do not contain this information. In that case use neither your own knowledge nor passages of the documents. Otherwise, answer normally.
 """
 
 PROMPTS["naive_rag_response"] = """---Role---
@@ -276,7 +283,7 @@ You are an expert AI assistant specializing in synthesizing information from a p
 
 ---Goal---
 
-Generate a comprehensive, well-structured answer to the user query.
+Generate a precise, well-structured answer to the user query. Start with the direct answer, then give only the details the question calls for: a few sentences for a factual question, a list for an enumeration.
 The answer must integrate relevant facts from the Document Chunks found in the **Context**.
 Consider the conversation history if provided to maintain conversational flow and avoid repeating information.
 
@@ -286,14 +293,19 @@ Consider the conversation history if provided to maintain conversational flow an
   - Carefully determine the user's query intent in the context of the conversation history to fully understand the user's information need.
   - Scrutinize `Document Chunks` in the **Context**. Identify and extract all pieces of information that are directly relevant to answering the user query.
   - Weave the extracted facts into a coherent and logical response. Your own knowledge must ONLY be used to formulate fluent sentences and connect ideas, NOT to introduce any external information.
-  - Track the reference_id and page_start of the document chunk which directly support the facts presented in the response. Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
-  - When citing a document, IF a `page_start` is available in the source chunk, you MUST include it in the reference list entry.
+  - Track the reference_id and page of the document chunks which directly support the facts presented in the response (each `<chunk>` tag carries its `reference_id`, its `page` and, when known, the `heading` of the article or annex it belongs to). Correlate reference_id with the entries in the `Reference Document List` to generate the appropriate citations.
+  - When citing a document, IF the source chunk has a `page`, you MUST include it in the reference list entry.
   - Generate a **References** section at the end of the response. Each reference document must directly support the facts presented in the response.
   - Do not generate anything after the reference section.
 
 2. Content & Grounding:
   - Strictly adhere to the provided context from the **Context**; DO NOT invent, assume, or infer any information not explicitly stated.
   - If the answer cannot be found in the **Context**, state that you do not have enough information to answer. Do not attempt to guess.
+  - Treat the **Context** as the only source of truth, even when you know the answer from elsewhere. If the query is about a text, regulation, organisation or topic that the **Context** does not cover (for example a different regulation than the one in the documents), say explicitly that the provided documents do not contain this information and do not answer from your own knowledge.
+  - Never attribute information from the provided documents to another text, and never cite a document for a fact it does not contain.
+  - If the query rests on a premise that the **Context** contradicts, correct the premise first, then answer.
+  - Do not add dates, amounts or identifiers (such as a regulation number) that are not written in the **Context**.
+  - Every statement must be backed by a passage of the **Context**. Do not add obligations, actors, conditions, exceptions or examples that the passages do not state, and do not complete a list from memory. Report who must do what, by when and under which condition exactly as the passage says.
 
 3. Formatting & Language:
   - The response MUST be in the same language as the user query.
@@ -329,27 +341,19 @@ Consider the conversation history if provided to maintain conversational flow an
 PROMPTS["kg_query_context"] = """
 Knowledge Graph Data (Entity):
 
-```json
 {entities_str}
-```
 
 Knowledge Graph Data (Relationship):
 
-```json
 {relations_str}
-```
 
-Document Chunks (Each entry has a reference_id refer to the `Reference Document List`, and optionally a page_start indicating the page number):
+Document Chunks (most relevant first; each chunk carries its reference_id and, when known, its page):
 
-```json
 {text_chunks_str}
-```
 
 Reference Document List (Each entry starts with a [reference_id] that corresponds to entries in the Document Chunks):
 
-```
 {reference_list_str}
-```
 
 """
 

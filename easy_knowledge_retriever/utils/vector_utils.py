@@ -154,13 +154,24 @@ async def pick_by_vector_similarity(
     # 3. Get embeddings
     # Optimally we should get from VDB, but filtering by ID list in VDB might be inefficient or unsupported
     # generic interface wise. Safest is to embed content.
-    contents = [data.get("content", "") for _, data in valid_pairs]
-    
-    if asyncio.iscoroutinefunction(embedding_func):
-        embeddings = await embedding_func(contents)
-    else:
-        embeddings = embedding_func(contents)
-        
+    # Reuse the vectors stored at ingestion: re-embedding every candidate chunk on each
+    # query cost 2-16 s (53-300 embeddings) and gave the same vectors.
+    stored = {}
+    if chunks_vdb is not None and hasattr(chunks_vdb, "get_vectors_by_ids"):
+        try:
+            stored = await chunks_vdb.get_vectors_by_ids([cid for cid, _ in valid_pairs])
+        except Exception as e:
+            logger.warning(f"Could not read stored chunk vectors, re-embedding: {e}")
+    missing = [i for i, (cid, _) in enumerate(valid_pairs) if cid not in stored]
+    fresh = {}
+    if missing:
+        batch = [valid_pairs[i][1].get("content", "") for i in missing]
+        vectors = embedding_func(batch)
+        if asyncio.iscoroutine(vectors) or asyncio.isfuture(vectors):
+            vectors = await vectors
+        fresh = dict(zip(missing, vectors))
+    embeddings = [stored[cid] if cid in stored else fresh[i] for i, (cid, _) in enumerate(valid_pairs)]
+
     # 4. Handle Query Embedding
     if query_embedding is None:
          if asyncio.iscoroutinefunction(embedding_func):
@@ -697,6 +708,13 @@ async def aexport_data(
 
 from easy_knowledge_retriever.reranker.base import BaseRerankerService
 
+def rerank_text(chunk: dict) -> str:
+    """Text scored by the reranker: the chunk heading (article/annex) is prepended, as for embeddings,
+    so a passage continuing an article is still judged against that article's subject."""
+    heading = chunk.get("heading")
+    return f"{heading}\n{chunk.get('content', '')}" if heading else chunk.get("content", "")
+
+
 async def process_retrieved_chunks(
     query: str,
     unique_chunks: list[dict],
@@ -724,7 +742,7 @@ async def process_retrieved_chunks(
     if reranker_service:
         try:
             # Extract contents
-            contents = [c.get("content", "") for c in final_chunks]
+            contents = [rerank_text(c) for c in final_chunks]
             # Rerank
             rerank_results = await reranker_service.rerank(query, contents)
             # Reorder unique_chunks based on results
@@ -736,6 +754,7 @@ async def process_retrieved_chunks(
             for r in rerank_results:
                 idx = r.get("index")
                 if idx is not None and 0 <= idx < len(final_chunks):
+                    final_chunks[idx]["rerank_score"] = r.get("relevance_score")
                     reordered_chunks.append(final_chunks[idx])
             
             # If we lost some chunks (shouldn't happen if reranker behaves), append missing ones or just use reordered
@@ -746,9 +765,14 @@ async def process_retrieved_chunks(
                         reordered_chunks.append(chunk)
             
             final_chunks = reordered_chunks
-            logger.info(f"Reranked {len(final_chunks)} chunks using {reranker_service.__class__.__name__}")
+            logger.info(f"Reranked {len(reordered_chunks)} chunks using {reranker_service.__class__.__name__}")
         except Exception as e:
             logger.error(f"Reranking failed: {e}. Falling back to original order.")
+        # Keep only the best chunks, reranked or not: past a dozen or so, extra passages are mostly
+        # distractors, and a reranker outage must not triple the prompt.
+        keep = getattr(query_param, "chunk_top_k", None)
+        if keep:
+            final_chunks = final_chunks[:keep]
 
     # 2. Token Truncation
     from easy_knowledge_retriever.utils.tokenizer import truncate_list_by_token_size

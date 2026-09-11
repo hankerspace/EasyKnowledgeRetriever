@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import asyncio
 import time
 import os
@@ -1624,6 +1625,16 @@ async def _merge_edges_then_upsert(
     return edge_data
 
 
+def entity_merge_key(name: str) -> str:
+    """Key under which surface variants of one entity merge: case, spacing, plural.
+
+    ponytail: drops a trailing s/x per word, so a few distinct names can collide
+    ("Bras"/"Bra"); synonyms ("Commission" / "European Commission") are not merged.
+    """
+    words = re.sub(r"\s+", " ", name or "").strip().casefold().split(" ")
+    return " ".join(w[:-1] if len(w) > 3 and w[-1] in "sx" else w for w in words)
+
+
 async def merge_nodes_and_edges(
     chunk_results: list,
     knowledge_graph_inst: BaseGraphStorage,
@@ -1666,15 +1677,32 @@ async def merge_nodes_and_edges(
     all_nodes = defaultdict(list)
     all_edges = defaultdict(list)
 
+    # Surface variants of one entity (case, plural: "High-Risk AI Systems" / "High-risk AI
+    # system") merge under the first name seen, so their descriptions and relations
+    # land on a single node instead of being scattered over near-duplicates.
+    canonical_names: dict[str, str] = {}
+
+    def _canonical(name):
+        return canonical_names.setdefault(entity_merge_key(name), name)
+
     for maybe_nodes, maybe_edges in chunk_results:
         # Collect nodes
         for entity_name, entities in maybe_nodes.items():
-            all_nodes[entity_name].extend(entities)
+            name = _canonical(entity_name)
+            for entity in entities:
+                if isinstance(entity, dict) and "entity_name" in entity:
+                    entity["entity_name"] = name
+            all_nodes[name].extend(entities)
 
         # Collect edges with sorted keys for undirected graph
         for edge_key, edges in maybe_edges.items():
-            sorted_edge_key = tuple(sorted(edge_key))
-            all_edges[sorted_edge_key].extend(edges)
+            src, tgt = (_canonical(n) for n in edge_key)
+            if src == tgt:
+                continue  # both ends were variants of the same entity
+            for edge in edges:
+                if isinstance(edge, dict):
+                    edge["src_id"], edge["tgt_id"] = src, tgt
+            all_edges[tuple(sorted((src, tgt)))].extend(edges)
 
     total_entities_count = len(all_nodes)
     total_relations_count = len(all_edges)

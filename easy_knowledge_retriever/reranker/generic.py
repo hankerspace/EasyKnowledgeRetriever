@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ssl
+
 import aiohttp
 from typing import Any, List, Dict, Optional
 from tenacity import (
@@ -12,9 +14,36 @@ from easy_knowledge_retriever.utils.logger import logger
 from .utils import chunk_documents_for_rerank, aggregate_chunk_scores
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """CA bundle from certifi when installed (as openai/httpx do): aiohttp otherwise relies on the
+    system store, which is empty on python.org macOS builds and fails every HTTPS rerank call."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def build_rerank_payload(model: str, query: str, documents: List[str], top_n: Optional[int] = None,
+                         extra_body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Standard rerank request body.
+
+    top_n is always an integer: some OpenAI-compatible backends (vLLM "score") reject a
+    missing or null top_n with a 400, and gateways balancing across mixed backends then
+    fail intermittently.
+    """
+    payload = {"model": model, "query": query, "documents": documents,
+               "top_n": top_n if top_n is not None else len(documents)}
+    if extra_body:
+        payload.update(extra_body)
+    return payload
+
+
+# Short waits: the failures seen are load-balancer 500s that succeed on the next try,
+# and every second here adds to the user-facing latency.
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
     retry=(
         retry_if_exception_type(aiohttp.ClientError)
         | retry_if_exception_type(aiohttp.ClientResponseError)
@@ -80,27 +109,13 @@ async def generic_rerank_api(
             )
             top_n = None
 
-    # Build request payload based on request format
-    # Standard format
-    payload = {
-        "model": model,
-        "query": query,
-        "documents": documents,
-    }
-
-    # Add optional parameters
-    if top_n is not None:
-        payload["top_n"] = top_n
-
-    # Add extra parameters
-    if extra_body:
-        payload.update(extra_body)
+    payload = build_rerank_payload(model, query, documents, top_n, extra_body)
 
     logger.debug(
         f"Rerank request: {len(documents)} documents, model: {model}, format: {response_format}"
     )
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_ssl_context())) as session:
         async with session.post(base_url, headers=headers, json=payload) as response:
             if response.status != 200:
                 error_text = await response.text()
