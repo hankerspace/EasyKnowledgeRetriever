@@ -20,12 +20,12 @@ from easy_knowledge_retriever.kg.kv_storage.json_doc_status_impl import JsonDocS
 
 async def main():
     # LLM Configuration
-    llm_api_key = "AIzaSyCXNwdAhQ8D39yntVVXXrMcLhYWVtnCrpE"
+    llm_api_key = os.environ["LLM_API_KEY"]
     llm_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
     llm_model = "gemini-2.5-flash-lite"
 
     # Embedding Configuration
-    embedding_api_key = "AIzaSyCXNwdAhQ8D39yntVVXXrMcLhYWVtnCrpE"
+    embedding_api_key = os.environ.get("EMBEDDING_API_KEY", llm_api_key)
     embedding_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
     embedding_model = "gemini-embedding-001"
     embedding_dim = 3072

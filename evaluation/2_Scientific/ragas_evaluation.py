@@ -61,17 +61,17 @@ EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(EVAL_DIR, "data")
 WORK_DIR = os.path.join(EVAL_DIR, "work_dir")
 
-# LLM Configuration (using same keys as example for now - user should replace or env vars)
-LLM_API_KEY = "AIzaSyAfd4owmFzZMjTP0-ByWqxH_XGGdhAfSaM"
-LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-LLM_MODEL = "gemini-2.5-flash-lite"
-EMBEDDING_API_KEY = "AIzaSyAfd4owmFzZMjTP0-ByWqxH_XGGdhAfSaM"
-EMBEDDING_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-EMBEDDING_MODEL = "gemini-embedding-001"
-EMBEDDING_DIM = 3072
-RERANKER_API_KEY = "gpustack_a446e348d5180a0b_a90a04f559a3aee4e0a24bc7ab4aef2e"
-RERANKER_BASE_URL = "https://llm.isaratech.com/v1"
-RERANKER_MODEL = "bge-reranker-v2-m3"
+# Endpoints and keys come from the environment (any OpenAI-compatible provider)
+LLM_API_KEY = os.environ["LLM_API_KEY"]
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gemini-2.5-flash-lite")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", LLM_API_KEY)
+EMBEDDING_BASE_URL = os.environ.get("EMBEDDING_BASE_URL", LLM_BASE_URL)
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "3072"))
+RERANKER_API_KEY = os.environ["RERANKER_API_KEY"]
+RERANKER_BASE_URL = os.environ["RERANKER_BASE_URL"]  # full /rerank endpoint
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "bge-reranker-v2-m3")
 
 async def setup_rag():
     if not os.path.exists(WORK_DIR):
